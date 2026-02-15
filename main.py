@@ -1,79 +1,118 @@
-from curl_cffi import requests
-from bs4 import BeautifulSoup
-import time, random, re
-from config import HEADERS, AMAZON_TAG
-from redis_client import ja_enviado
+import asyncio, threading, os, io, requests
+from flask import Flask
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+from config import API_ID, API_HASH, STRING_SESSION, MEU_CANAL, LOG_CANAL
+from redis_client import marcar_enviado
+from amazon import buscar_amazon
+from mercado_livre import buscar_mercado_livre
 
-def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
-    url = f"https://www.amazon.com.br/s?k={termo}"
-    try:
-        time.sleep(random.uniform(1, 3))
-        response = requests.get(url, headers=HEADERS, impersonate="chrome124", timeout=20)
-        if response.status_code != 200: return []
+# Canal de Teste
+CANAL_TESTE = "@canaltesteachados"
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot de Ofertas Online!", 200
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+
+def definir_tag(titulo: str) -> str:
+    t = titulo.lower()
+    if any(x in t for x in ["piscina", "casa", "cozinha", "cadeira"]): return "Casa"
+    if any(x in t for x in ["tv", "smart", "led", "monitor"]): return "Eletrônicos"
+    if any(x in t for x in ["gamer", "ps5", "nintendo", "xbox"]): return "Gamer"
+    return "Ofertas"
+
+async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False, canal_destino: str = MEU_CANAL):
+    novos = produtos if modo_teste else [p for p in produtos if p.get('status') == "novo"]
+    
+    for p in novos:
+        try:
+            tag = definir_tag(p['titulo'])
+            caption = f"🔥 **{p['titulo']}**\n"
+            if p.get('avaliacao'): caption += f"{p['avaliacao']}\n"
+            caption += f"{p['vendas']}\n\n"
+            
+            if p.get('preco_antigo'):
+                desc = p['desconto'] if p.get('desconto') else "OFERTA"
+                caption += f"💰 ~~R$ {p['preco_antigo']}~~\n"
+                caption += f"✅ **R$ {p['preco']}** ({desc})\n"
+            else:
+                caption += f"💰 **R$ {p['preco']}**\n"
+                
+            caption += f"💳 {p['parcelas']}\n"
+            caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
+            caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
+
+            enviado = False
+            if p.get("imagem"):
+                try:
+                    r = requests.get(p["imagem"], timeout=10)
+                    if r.status_code == 200:
+                        foto = io.BytesIO(r.content)
+                        foto.name = 'produto.jpg'
+                        await client.send_file(canal_destino, foto, caption=caption, parse_mode='md')
+                        enviado = True
+                except: pass
+            
+            if not enviado:
+                await client.send_message(canal_destino, caption, parse_mode='md')
+            
+            if not modo_teste: 
+                marcar_enviado(p["id"])
+                await asyncio.sleep(15)
+            else:
+                await asyncio.sleep(2)
+
+        except Exception as e:
+            print(f"Erro ao postar item: {e}")
+
+@client.on(events.NewMessage(pattern='/testar'))
+async def teste_handler(event):
+    await event.respond("🚀 Iniciando captura de teste...")
+    produtos_ml = buscar_mercado_livre("ofertas", limite=2)
+    await processar_plataforma("TESTE ML", produtos_ml, modo_teste=True, canal_destino=CANAL_TESTE)
+    await event.respond(f"✅ Teste concluído em {CANAL_TESTE}")
+
+async def loop_ofertas():
+    while True:
+        try:
+            print("🔎 Iniciando busca automática...")
+            p_ml = buscar_mercado_livre()
+            await processar_plataforma("ML", p_ml)
+            
+            p_amz = buscar_amazon()
+            await processar_plataforma("AMZ", p_amz)
+        except Exception as e:
+            print(f"Erro no loop: {e}")
         
-        resultados = []
-        for produto in produtos:
-            if len(resultados) >= limite: break
-            asin = produto.get("data-asin")
-            if not asin: continue
+        print("😴 Aguardando 1 hora...")
+        await asyncio.sleep(3600)
 
-            # --- CAPTURA DE PREÇO E DESCONTO ---
-            # Preço Atual (o que o cliente paga)
-            preco_venda_container = produto.select_one(".a-price")
-            fração = produto.select_one(".a-price-whole")
-            centavos = produto.select_one(".a-price-fraction")
-            
-            if not fração: continue # Se não tem preço, pula o produto
-            
-            valor_final = fração.get_text(strip=True).replace(".", "")
-            if centavos:
-                valor_final += f",{centavos.get_text(strip=True)}"
+async def start_bot():
+    await client.start()
+    # Cria a tarefa do loop de ofertas para rodar em background
+    asyncio.create_task(loop_ofertas())
+    print("🤖 Bot de Telegram iniciado!")
+    await client.run_until_disconnected()
 
-            # Preço Antigo (Preço de Lista / Riscado)
-            preco_antigo_tag = produto.select_one(".a-price.a-text-price .a-offscreen")
-            preco_antigo = None
-            if preco_antigo_tag:
-                # Remove o "R$" e espaços para padronizar
-                preco_antigo = preco_antigo_tag.get_text(strip=True).replace("R$", "").strip()
+def run_flask():
+    # O Render fornece a porta na variável de ambiente PORT
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
-            # Desconto (Cálculo ou Tag)
-            desconto_tag = produto.select_one(".a-letterpress") # Às vezes aparece como "10% de desconto"
-            porcentagem = desconto_tag.get_text(strip=True) if desconto_tag else None
-            
-            # Se não achou a tag de desconto mas tem preço antigo, podemos deixar o bot calcular 
-            # ou apenas exibir o preço riscado.
-
-            # --- TÍTULO E IMAGEM ---
-            titulo_tag = produto.select_one("h2 span")
-            img_tag = produto.select_one(".s-image")
-            
-            if not titulo_tag: continue
-
-            texto_todo = produto.get_text().lower()
-            
-            # --- PARCELAMENTO ---
-            parcelas = "Consulte parcelamento no site"
-            match_parc = re.search(r"em até (\d+x.*?de\s+r\$\s?[\d,.]+)", texto_todo)
-            if match_parc: 
-                parcelas = f"Em até {match_parc.group(1)}"
-
-            resultados.append({
-                "id": asin,
-                "titulo": titulo_tag.get_text(strip=True),
-                "preco": valor_final,
-                "preco_antigo": preco_antigo,
-                "desconto": porcentagem,
-                "imagem": img_tag.get("src") if img_tag else None,
-                "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
-                "parcelas": parcelas,
-                "vendas": "🔥 Oferta em destaque" if "mais vendido" in texto_todo else "📦 Novo",
-                "avaliacao": "⭐ Ver avaliações" if "estrelas" in texto_todo else None,
-                "status": "duplicado" if ja_enviado(asin) else "novo"
-            })
-        return resultados
-    except Exception as e:
-        print(f"Erro Amazon: {e}")
-        return []
+if __name__ == "__main__":
+    # Inicia o Flask em uma thread separada
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # Inicia o loop do Telethon
+    try:
+        asyncio.run(start_bot())
+    except KeyboardInterrupt:
+        pass
