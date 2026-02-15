@@ -6,9 +6,11 @@ from redis_client import ja_enviado
 
 def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]:
     url = f"https://www.mercadolivre.com.br/ofertas?keywords={termo}"
+    
     try:
         response = requests.get(url, headers=HEADERS, impersonate="chrome110", timeout=15)
-        if response.status_code != 200: return []
+        if response.status_code != 200:
+            return []
 
         soup = BeautifulSoup(response.text, "html.parser")
         items = soup.select(".ui-search-layout__item") or soup.select(".poly-card")
@@ -16,6 +18,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
         resultados = []
         for item in items:
             if len(resultados) >= limite: break
+
             link_tag = item.select_one("a")
             if not link_tag: continue
             
@@ -29,33 +32,36 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             if img_url:
                 img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
 
-            # Detalhes do Produto
+            # Título
             titulo = item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True)
             
-            # Lógica de Preços Detalhada
-            preco_venda = item.select_one(".andes-money-amount__fraction").get_text(strip=True)
+            # Preços: O ML mostra o preço atual na classe principal
+            preco_atual = item.select_one(".andes-money-amount__fraction").get_text(strip=True)
             
-            # Tenta capturar selos e informações extras
+            # Tenta capturar preço antigo/original para mostrar o desconto
+            preco_antigo_tag = item.select_one(".andes-money-amount__price--previous .andes-money-amount__fraction")
+            preco_antigo = preco_antigo_tag.get_text(strip=True) if preco_antigo_tag else None
+
+            # Prova Social e Descontos
             texto_item = item.get_text(" ", strip=True).lower()
             
-            desconto_pix = None
-            if "off no pix" in texto_item or "pix" in texto_item:
-                # Tenta achar a porcentagem real (ex: 49% OFF)
-                tag_off = item.select_one(".andes-money-amount__discount, .ui-search-price__discount")
-                desconto_pix = tag_off.get_text(strip=True) if tag_off else "Desconto"
+            desconto_tag = item.select_one(".andes-money-amount__discount, .ui-search-price__discount")
+            porcentagem_off = desconto_tag.get_text(strip=True) if desconto_tag else None
 
             vendas = "Novo"
-            if "+10mil vendidos" in texto_item: vendas = "🔥 +10mil vendidos"
-            elif "vendidos" in texto_item: vendas = "✅ Destaque em vendas"
+            if "vendido" in texto_item:
+                if "+500" in texto_item: vendas = "📦 +500 vendidos"
+                elif "+10mil" in texto_item: vendas = "📦 +10mil vendidos"
+                else: vendas = "📦 Destaque em vendas"
 
             avaliacao = "⭐ 4.8+" if "4." in texto_item else None
 
             resultados.append({
                 "id": prod_id,
                 "titulo": titulo,
-                "preco": preco_venda,
-                "preco_pix": preco_venda, # O ML costuma mostrar o menor preço na fração principal
-                "desconto": desconto_pix,
+                "preco": preco_atual,
+                "preco_antigo": preco_antigo,
+                "desconto": porcentagem_off,
                 "imagem": img_url,
                 "link": f"{link}&matt_tool={MATT_TOOL}",
                 "vendas": vendas,
@@ -63,6 +69,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
                 "parcelas": item.select_one(".poly-component__installments").get_text(strip=True) if item.select_one(".poly-component__installments") else "Confira parcelas",
                 "status": "duplicado" if ja_enviado(prod_id) else "novo"
             })
+            
         return resultados
     except Exception as e:
         print(f"Erro ML: {e}")
