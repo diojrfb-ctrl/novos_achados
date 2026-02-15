@@ -2,5 +2,6 @@ telethon
 curl_cffi
 beautifulsoup4
 upstash-redis
+requests
 python-dotenv
 flask
