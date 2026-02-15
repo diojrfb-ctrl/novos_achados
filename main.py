@@ -1,9 +1,8 @@
 import asyncio
 import threading
 import os
+import random
 from flask import Flask
-
-# Importações corrigidas para Telethon
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
@@ -15,214 +14,108 @@ from redis_client import marcar_enviado
 from amazon import buscar_amazon
 from mercado_livre import buscar_mercado_livre
 
-# =========================
-# CONFIGURAÇÃO DO CLIENTE
-# =========================
+# --- MAPEAMENTO DE CATEGORIAS ---
+CATEGORIAS = {
+    "🎮 #Gamer": ["gamer", "teclado", "mouse", "headset", "ps5", "xbox", "nintendo", "placa de vídeo", "monitor", "rtx"],
+    "📱 #Eletronicos": ["smartphone", "celular", "iphone", "carregador", "fone", "bluetooth", "tablet", "notebook", "pc", "alexa"],
+    "🏠 #Casa": ["cozinha", "fritadeira", "air fryer", "aspirador", "móvel", "decoração", "iluminação", "cama", "ventilador"],
+    "🚗 #Automotivo": ["carro", "pneu", "óleo", "automotivo", "moto", "capacete", "limpeza automotiva", "suporte"],
+    "👟 #Moda": ["tênis", "sapato", "camiseta", "calça", "roupa", "mochila", "relógio", "óculos", "nike", "adidas"],
+    "🛠 #Ferramentas": ["furadeira", "parafusadeira", "ferramenta", "martelo", "jogo de chaves", "trena", "bosch"],
+    "🧴 #Beleza": ["perfume", "creme", "shampoo", "maquiagem", "skincare", "barbeador", "secador"],
+    "🥦 #Mercado": ["bis", "chocolate", "suplemento", "whey", "creatina", "bebida", "café", "limpeza", "fralda", "leite"],
+    "⚽ #Esporte": ["bola", "academia", "pesos", "bicicleta", "garrafa", "esporte", "camping"]
+}
 
-# Criamos o objeto client fora para que os decorators (@client.on) funcionem
-client = TelegramClient(
-    StringSession(STRING_SESSION),
-    API_ID,
-    API_HASH
-)
+def identificar_categoria(titulo: str) -> str:
+    titulo_lower = titulo.lower()
+    for cat, keywords in CATEGORIAS.items():
+        if any(kw in titulo_lower for kw in keywords):
+            return cat
+    return "📦 #Variedades"
 
-# =========================
-# FUNÇÕES DE AUXÍLIO
-# =========================
+# --- CONFIGURAÇÃO DO CLIENTE ---
+client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 async def enviar_log(texto: str):
-    """Envia mensagens detalhadas para o canal de logs."""
     try:
         await client.send_message(LOG_CANAL, texto)
-    except Exception as e:
-        print(f"Erro ao enviar log: {e}")
+    except:
+        print(f"Erro log: {texto}")
 
 async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
-    """
-    Processa a lista de produtos capturados, gera relatórios técnicos detalhados 
-    no canal de logs e gerencia a postagem no canal de ofertas.
-    """
-    
-    # 1. LOG DE DIAGNÓSTICO INICIAL
     if not produtos:
-        # Se a lista está vazia, o problema é na raspagem (HTML/Bloqueio)
-        msg_erro = (
-            f"❌ **FALHA DE CAPTURA: {nome}**\n\n"
-            f"**Status:** Nenhum dado extraído.\n"
-            f"**Possíveis Causas:**\n"
-            f"1. IP do Render bloqueado pelo WAF (403 Forbidden).\n"
-            f"2. O site exibiu um Captcha em vez da lista de produtos.\n"
-            f"3. Os Seletores CSS (BeautifulSoup) estão desatualizados.\n"
-            f"**Sugestão:** Verifique os logs do console no Render para ver o Status Code."
-        )
-        await enviar_log(msg_erro)
+        await enviar_log(f"❌ **{nome}**: Falha na captura de dados ou site bloqueado.")
         return
 
-    # 2. SEPARAÇÃO DE DADOS (NOVOS VS DUPLICADOS)
-    # Filtramos baseado no campo 'status' que as funções de busca preenchem
     novos = [p for p in produtos if p.get('status') == "novo"]
-    duplicados = [p for p in produtos if p.get('status') == "duplicado"]
-
-    # 3. CONSTRUÇÃO DO RELATÓRIO DETALHADO PARA O CANAL DE LOGS
-    tipo_operacao = "🧪 MODO TESTE" if modo_teste else "📡 VARREDURA AUTOMÁTICA"
     
-    relatorio = f"📊 **RELATÓRIO TÉCNICO: {nome}**\n"
-    relatorio += f"**Contexto:** {tipo_operacao}\n"
-    relatorio += f"────────────────────\n"
-    relatorio += f"📦 **Total Analisado:** {len(produtos)} itens\n"
-    relatorio += f"✅ **Aptos para Postar:** {len(novos)}\n"
-    relatorio += f"♻️ **Já Enviados (Redis):** {len(duplicados)}\n\n"
+    await enviar_log(f"📊 **{nome}**: {len(novos)} ofertas novas encontradas.")
 
-    if novos:
-        relatorio += "📝 **Preview dos itens capturados:**\n"
-        for idx, p in enumerate(novos[:5], 1): # Mostra os 5 primeiros para não inundar o log
-            pix = "⚡️[PIX]" if p.get('tem_pix') else ""
-            relatorio += f"{idx}. {p['titulo'][:35]}... | R$ {p['preco']} {pix}\n"
-    else:
-        relatorio += "ℹ️ *Nenhuma oferta nova encontrada nesta rodada.*\n"
-
-    # Envia o relatório detalhado ao canal de logs
-    await enviar_log(relatorio)
-
-    # 4. LÓGICA DE POSTAGEM (PULA SE FOR MODO TESTE)
-    if modo_teste:
-        await enviar_log(f"ℹ️ **{nome}**: Simulação finalizada. Nada foi enviado ao canal principal.")
-        return
-
-    # Se não for teste, percorre a lista de novos e envia ao canal principal
     for p in novos:
         try:
-            # Montagem da mensagem formatada para o usuário final
-            msg_canal = f"🔥 **OFERTA {nome}**\n\n"
-            msg_canal += f"🛍 {p['titulo']}\n"
-            msg_canal += f"💰 **R$ {p['preco']}**\n\n"
+            # Identifica Categoria e Tag
+            categoria_full = identificar_categoria(p['titulo'])
+            tag_unica = categoria_full.split(" ")[1] # Ex: #Gamer
+
+            # Layout Visual Profissional
+            msg = f"{categoria_full}\n\n"
+            msg += f"🛍 **{p['titulo']}**\n\n"
             
-            # Adição de selos de destaque
+            msg += f"💰 **POR APENAS: R$ {p['preco']}**\n"
+            
             if p.get("tem_pix"):
-                msg_canal += "⚡️ Desconto especial no Pix!\n"
+                msg += "⚡️ *Preço especial no PIX*\n"
             if p.get("tem_cupom"):
-                msg_canal += "🎟 Verifique o cupom na página!\n"
-            if p.get("mais_vendido"):
-                msg_canal += "🏆 Destaque: Um dos mais vendidos!\n"
+                msg += "🎟 *Ative o cupom na página*\n"
+            
+            msg += f"\n🛒 **COMPRE AQUI:**\n{p['link']}\n\n"
+            
+            msg += f"────────────────────\n"
+            msg += f"🔍 Ver mais como este: {tag_unica}"
 
-            msg_canal += f"\n🔗 **Compre aqui:**\n{p['link']}"
-
-            # Envio para o Canal Principal
-            await client.send_message(MEU_CANAL, msg_canal)
-            
-            # Salva no Redis para nunca repetir este ID
-            marcar_enviado(p["id"])
-            
-            # Log de sucesso individual
-            print(f"[OK] Postado: {p['id']}")
-            
-            # Anti-Spam: espera 5 segundos entre uma oferta e outra
-            await asyncio.sleep(5)
+            if not modo_teste:
+                await client.send_message(MEU_CANAL, msg)
+                marcar_enviado(p["id"])
+                
+                # Cooldown Aleatório para não encher notificações
+                delay = random.randint(120, 300) # 2 a 5 minutos
+                print(f"[LOG] {nome} postado. Pausa de {delay}s.")
+                await asyncio.sleep(delay)
+            else:
+                await enviar_log(f"🧪 **PREVIEW TESTE**:\n{msg}")
+                await asyncio.sleep(2)
 
         except Exception as e:
-            await enviar_log(f"⚠️ **ERRO AO POSTAR ITEM:**\nID: {p.get('id')}\nErro: {str(e)}")
-    
-    if not produtos:
-        await enviar_log(f"❌ **{nome}**: Nenhum produto encontrado. Verifique os seletores.")
-        return
-
-    novos = [p for p in produtos if p.get('status') == "novo"]
-    duplicados = [p for p in produtos if p.get('status') == "duplicado"]
-
-    # --- Relatório Detalhado de Logs ---
-    status_label = "🧪 TESTE" if modo_teste else "📡 VARREDURA"
-    relatorio = f"🔍 **{status_label} - {nome}**\n"
-    relatorio += f"📦 Analisados: {len(produtos)} | ✅ Novos: {len(novos)} | ♻️ Repetidos: {len(duplicados)}\n\n"
-    
-    if novos:
-        relatorio += "**Top encontrados:**\n"
-        for idx, p in enumerate(novos[:3], 1):
-            relatorio += f"{idx}. {p['titulo'][:30]}... - R$ {p['preco']}\n"
-    
-    await enviar_log(relatorio)
-
-    if modo_teste:
-        return
-
-    # --- Postagem no Canal ---
-    for p in novos:
-        try:
-            msg = f"🔥 OFERTA {nome}\n\n"
-            msg += f"🛍 {p['titulo']}\n"
-            msg += f"💰 R$ {p['preco']}\n"
-            
-            if p.get("tem_pix"): msg += "⚡️ Economize pagando no Pix!\n"
-            if p.get("tem_cupom"): msg += "🎟 Tem cupom na página!\n"
-            if p.get("mais_vendido"): msg += "🏆 Destaque: Mais Vendido\n"
-
-            msg += f"\n🔗 Comprar:\n{p['link']}"
-
-            await client.send_message(MEU_CANAL, msg)
-            marcar_enviado(p["id"])
-            await asyncio.sleep(5)
-        except Exception as e:
-            await enviar_log(f"⚠️ Erro ao postar item {p['id']}: {e}")
-
-# =========================
-# COMANDO DE TESTE MANUAL
-# =========================
+            await enviar_log(f"⚠️ Erro ao postar {p.get('id')}: {e}")
 
 @client.on(events.NewMessage(pattern='/testar'))
 async def handler_teste(event):
-    await event.reply("🧪 Teste iniciado! Olhe o canal de logs.")
+    await event.reply("🧪 Iniciando varredura de teste rápida...")
     await executar_ciclo(modo_teste=True)
 
-# =========================
-# LÓGICA DE CICLO
-# =========================
-
 async def executar_ciclo(modo_teste: bool = False):
-    produtos_amz = buscar_amazon()
-    await processar_plataforma("AMAZON", produtos_amz, modo_teste)
+    amz = buscar_amazon()
+    await processar_plataforma("AMAZON", amz, modo_teste)
     
-    produtos_ml = buscar_mercado_livre()
-    await processar_plataforma("MERCADO LIVRE", produtos_ml, modo_teste)
+    ml = buscar_mercado_livre()
+    await processar_plataforma("MERCADO LIVRE", ml, modo_teste)
 
 async def main():
-    """Função principal que gerencia o loop assíncrono."""
-    # Inicia o cliente Telethon corretamente
     await client.start()
-    await enviar_log("✅ **Bot Online e Operacional!**\nUse `/testar` para validar.")
-
+    await enviar_log("✅ **Bot Online!** Categorias e Cooldown ativos.")
+    
     while True:
         try:
             await executar_ciclo(modo_teste=False)
         except Exception as e:
-            await enviar_log(f"🚨 **ERRO CRÍTICO NO LOOP:**\n{e}")
-        
-        # Dorme por 1 hora
+            await enviar_log(f"🚨 Erro Loop: {e}")
         await asyncio.sleep(3600)
 
-# =========================
-# SERVIDOR FLASK (RENDER)
-# =========================
-
 app = Flask(__name__)
-
 @app.route("/")
-def home():
-    return "Bot de ofertas rodando!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-# =========================
-# INICIALIZAÇÃO FINAL
-# =========================
+def home(): return "Bot Ativo"
 
 if __name__ == "__main__":
-    # Inicia o Flask em uma thread separada (daemon para fechar com o processo pai)
-    t = threading.Thread(target=run_flask, daemon=True)
-    t.start()
-    
-    # Inicia o asyncio da maneira correta para Python 3.14
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
+    asyncio.run(main())
