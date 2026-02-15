@@ -3,7 +3,7 @@ import threading
 import os
 from flask import Flask
 
-# Correção da importação para evitar o ImportError no Python 3.14
+# Importações corrigidas para Telethon
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
@@ -19,6 +19,7 @@ from mercado_livre import buscar_mercado_livre
 # CONFIGURAÇÃO DO CLIENTE
 # =========================
 
+# Criamos o objeto client fora para que os decorators (@client.on) funcionem
 client = TelegramClient(
     StringSession(STRING_SESSION),
     API_ID,
@@ -40,7 +41,7 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
     """Processa a lista de produtos, gera relatório de log e posta se necessário."""
     
     if not produtos:
-        await enviar_log(f"❌ **{nome}**: Nenhum produto encontrado. Seletores podem estar desatualizados ou o site bloqueou o acesso.")
+        await enviar_log(f"❌ **{nome}**: Nenhum produto encontrado. Verifique os seletores.")
         return
 
     novos = [p for p in produtos if p.get('status') == "novo"]
@@ -49,43 +50,33 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
     # --- Relatório Detalhado de Logs ---
     status_label = "🧪 TESTE" if modo_teste else "📡 VARREDURA"
     relatorio = f"🔍 **{status_label} - {nome}**\n"
-    relatorio += f"📦 Analisados na página: {len(produtos)}\n"
-    relatorio += f"✅ Novos encontrados: {len(novos)}\n"
-    relatorio += f"♻️ Ignorados (já postados): {len(duplicados)}\n\n"
+    relatorio += f"📦 Analisados: {len(produtos)} | ✅ Novos: {len(novos)} | ♻️ Repetidos: {len(duplicados)}\n\n"
     
     if novos:
-        relatorio += "**Prontos para postagem:**\n"
-        for idx, p in enumerate(novos[:5], 1): # Mostra os 5 primeiros no log
-            pix_info = "⚡️ [Pix]" if p.get('tem_pix') else ""
-            relatorio += f"{idx}. {p['titulo'][:35]}... - R$ {p['preco']} {pix_info}\n"
+        relatorio += "**Top encontrados:**\n"
+        for idx, p in enumerate(novos[:3], 1):
+            relatorio += f"{idx}. {p['titulo'][:30]}... - R$ {p['preco']}\n"
     
     await enviar_log(relatorio)
 
-    # Se estiver em modo teste, não envia para o canal principal
     if modo_teste:
         return
 
-    # --- Postagem no Canal de Ofertas ---
+    # --- Postagem no Canal ---
     for p in novos:
         try:
             msg = f"🔥 OFERTA {nome}\n\n"
             msg += f"🛍 {p['titulo']}\n"
             msg += f"💰 R$ {p['preco']}\n"
             
-            # Vantagens Dinâmicas
-            if p.get("tem_pix"):
-                msg += "⚡️ Economize pagando no Pix!\n"
-            if p.get("tem_cupom"):
-                msg += "🎟 Tem cupom disponível na página!\n"
-            if p.get("mais_vendido"):
-                msg += "🏆 Um dos mais vendidos da categoria\n"
+            if p.get("tem_pix"): msg += "⚡️ Economize pagando no Pix!\n"
+            if p.get("tem_cupom"): msg += "🎟 Tem cupom na página!\n"
+            if p.get("mais_vendido"): msg += "🏆 Destaque: Mais Vendido\n"
 
             msg += f"\n🔗 Comprar:\n{p['link']}"
 
             await client.send_message(MEU_CANAL, msg)
             marcar_enviado(p["id"])
-            
-            # Delay anti-spam
             await asyncio.sleep(5)
         except Exception as e:
             await enviar_log(f"⚠️ Erro ao postar item {p['id']}: {e}")
@@ -96,8 +87,7 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
 
 @client.on(events.NewMessage(pattern='/testar'))
 async def handler_teste(event):
-    """Responde ao comando /testar no Telegram."""
-    await event.reply("🧪 Iniciando varredura de teste... Verifique o canal de logs.")
+    await event.reply("🧪 Teste iniciado! Olhe o canal de logs.")
     await executar_ciclo(modo_teste=True)
 
 # =========================
@@ -105,19 +95,17 @@ async def handler_teste(event):
 # =========================
 
 async def executar_ciclo(modo_teste: bool = False):
-    """Executa a busca nas duas plataformas."""
-    # Amazon
     produtos_amz = buscar_amazon()
     await processar_plataforma("AMAZON", produtos_amz, modo_teste)
     
-    # Mercado Livre
     produtos_ml = buscar_mercado_livre()
     await processar_plataforma("MERCADO LIVRE", produtos_ml, modo_teste)
 
-async def bot_loop():
-    """Loop principal que roda a cada 1 hora."""
+async def main():
+    """Função principal que gerencia o loop assíncrono."""
+    # Inicia o cliente Telethon corretamente
     await client.start()
-    await enviar_log("✅ **Bot Online e Operacional!**\nUse `/testar` para validar agora.")
+    await enviar_log("✅ **Bot Online e Operacional!**\nUse `/testar` para validar.")
 
     while True:
         try:
@@ -125,6 +113,7 @@ async def bot_loop():
         except Exception as e:
             await enviar_log(f"🚨 **ERRO CRÍTICO NO LOOP:**\n{e}")
         
+        # Dorme por 1 hora
         await asyncio.sleep(3600)
 
 # =========================
@@ -135,19 +124,23 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Bot de ofertas rodando com sucesso!"
+    return "Bot de ofertas rodando!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 # =========================
-# INICIALIZAÇÃO
+# INICIALIZAÇÃO FINAL
 # =========================
 
 if __name__ == "__main__":
-    # Flask em thread separada
-    threading.Thread(target=run_flask, daemon=True).start()
+    # Inicia o Flask em uma thread separada (daemon para fechar com o processo pai)
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
     
-    # Execução do Telethon
-    client.loop.run_until_complete(bot_loop())
+    # Inicia o asyncio da maneira correta para Python 3.14
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

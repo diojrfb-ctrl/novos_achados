@@ -1,4 +1,4 @@
-telethon==1.42.0
+telethon
 curl_cffi
 beautifulsoup4
 upstash-redis
