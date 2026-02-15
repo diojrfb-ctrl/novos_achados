@@ -1,0 +1,5 @@
+telethon
+curl_cffi
+beautifulsoup4
+upstash-redis
+python-dotenv
