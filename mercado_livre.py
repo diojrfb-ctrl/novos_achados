@@ -13,7 +13,9 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        items = soup.select(".ui-search-layout__item") or soup.select(".poly-card")
+        items = soup.select(".ui-search-layout__item") or \
+                soup.select(".poly-card") or \
+                soup.select(".promotion-item")
 
         resultados = []
         for item in items:
@@ -28,28 +30,28 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             prod_id = extrair_mlb(link)
             if not prod_id: continue
 
-            # Captura da Imagem Otimizada
+            # --- CORREÇÃO DA IMAGEM ---
             img_tag = item.select_one("img")
             img_url = None
             if img_tag:
+                # Pega do data-src (lazy load) ou do src direto
                 img_url = img_tag.get("data-src") or img_tag.get("src")
-                # Força a imagem de alta resolução (Original) para evitar "figurinha"
-                if img_url and "D_NQ_NP" in img_url:
-                    img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
+                
+                if img_url:
+                    # Remove extensões de miniatura e força o JPG Original (-O)
+                    # Isso evita que o Telegram trate como 'sticker' ou arquivo genérico
+                    img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg").replace("-X.jpg", "-O.jpg")
+                    if ".webp" in img_url:
+                        img_url = img_url.split(".webp")[0] # Tenta pegar apenas a base antes do webp
 
             titulo_tag = item.select_one(".ui-search-item__title") or \
                          item.select_one(".poly-component__title")
             
             preco_tag = item.select_one(".andes-money-amount__fraction")
-            
-            # Captura de parcelamento
             parc_tag = item.select_one(".poly-component__installments") or \
                        item.select_one(".ui-search-item__group__element")
 
             if not titulo_tag or not preco_tag: continue
-
-            status = "duplicado" if ja_enviado(prod_id) else "novo"
-            texto_completo = item.get_text(" ", strip=True).lower()
 
             resultados.append({
                 "id": prod_id,
@@ -57,9 +59,9 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
                 "preco": preco_tag.get_text(strip=True),
                 "imagem": img_url,
                 "link": f"{link}&matt_tool={MATT_TOOL}",
-                "parcelas": parc_tag.get_text(strip=True) if parc_tag else "Consulte parcelas",
-                "tem_pix": "pix" in texto_completo,
-                "status": status
+                "parcelas": parc_tag.get_text(strip=True) if parc_tag else "Consulte parcelas no site",
+                "tem_pix": "pix" in item.get_text().lower(),
+                "status": "duplicado" if ja_enviado(prod_id) else "novo"
             })
             
         return resultados
