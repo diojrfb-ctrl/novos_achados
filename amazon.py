@@ -10,43 +10,57 @@ def gerar_link_amazon(url: str) -> str:
     return f"{url}&tag={AMAZON_TAG}" if "?" in url else f"{url}?tag={AMAZON_TAG}"
 
 def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
-    url = f"https://www.amazon.com.br/s?k={termo}"
+    # URL focada em resultados de busca reais
+    url = f"https://www.amazon.com.br/s?k={termo}&ref=nb_sb_noss"
+    
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
+        
+        # Log interno se houver bloqueio
         if response.status_code != 200:
+            print(f"Erro Amazon: Status {response.status_code}")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        produtos = soup.select("div[data-component-type='s-search-result']")
+        
+        # Seletores atualizados para 2026
+        produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
         
         resultados = []
         for produto in produtos[:limite]:
-            link_tag = produto.select_one("a.a-link-normal.s-no-outline")
-            if not link_tag:
+            # Pega o ASIN diretamente do atributo do site
+            asin = produto.get("data-asin")
+            if not asin or ja_enviado(asin):
                 continue
 
+            # Busca título e link com seletores mais abrangentes
+            h2 = produto.find("h2")
+            if not h2: continue
+            
+            titulo = h2.get_text(strip=True)
+            link_tag = h2.find("a", href=True)
+            if not link_tag: continue
+            
             link = "https://www.amazon.com.br" + link_tag["href"]
-            asin = extrair_asin(link)
-            titulo_tag = produto.select_one("h2 span")
+            
+            # Busca preço (pode variar a classe, tentamos as mais comuns)
             preco_tag = produto.select_one(".a-price-whole")
-
-            if not titulo_tag or not preco_tag:
-                continue
-
-            titulo = titulo_tag.get_text(strip=True)
-            ja_foi = ja_enviado(asin) if asin else False
+            if not preco_tag: continue
+            
+            preco = preco_tag.get_text(strip=True)
             texto_completo = produto.get_text(" ", strip=True).lower()
 
             resultados.append({
                 "id": asin,
                 "titulo": titulo,
-                "preco": preco_tag.get_text(strip=True),
+                "preco": preco,
                 "link": gerar_link_amazon(link),
                 "tem_pix": "pix" in texto_completo or "boleto" in texto_completo,
                 "tem_cupom": "cupom" in texto_completo or "aplicar" in texto_completo,
-                "status": "duplicado" if ja_foi else "novo"
+                "status": "novo"
             })
+            
         return resultados
     except Exception as e:
-        print(f"Erro Amazon: {e}")
+        print(f"Falha na raspagem Amazon: {e}")
         return []

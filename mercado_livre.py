@@ -10,31 +10,36 @@ def gerar_link_ml(url: str) -> str:
     return f"{url}&matt_tool={MATT_TOOL}" if "?" in url else f"{url}?matt_tool={MATT_TOOL}"
 
 def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]:
+    # URL de busca limpa
     url = f"https://lista.mercadolivre.com.br/{termo}"
+    
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
         if response.status_code != 200:
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        produtos = soup.select(".ui-search-result__wrapper")
+        
+        # Seletores do ML costumam mudar entre 'ui-search-layout__item' e 'ui-search-result__wrapper'
+        items = soup.select(".ui-search-layout__item") or soup.select(".ui-search-result__wrapper")
 
         resultados = []
-        for produto in produtos[:limite]:
-            link_tag = produto.select_one("a.ui-search-link")
-            if not link_tag:
-                continue
+        for item in items[:limite]:
+            link_tag = item.select_one("a.ui-search-link")
+            if not link_tag: continue
 
             link = link_tag["href"]
             prod_id = extrair_mlb(link)
-            preco_tag = produto.select_one(".andes-money-amount__fraction")
-            titulo_tag = produto.select_one(".ui-search-item__title")
-
-            if not preco_tag or not titulo_tag:
+            
+            if not prod_id or ja_enviado(prod_id):
                 continue
 
-            ja_foi = ja_enviado(prod_id) if prod_id else False
-            texto_completo = produto.get_text(" ", strip=True).lower()
+            titulo_tag = item.select_one(".ui-search-item__title")
+            preco_tag = item.select_one(".andes-money-amount__fraction")
+
+            if not titulo_tag or not preco_tag: continue
+
+            texto_completo = item.get_text(" ", strip=True).lower()
 
             resultados.append({
                 "id": prod_id,
@@ -43,9 +48,9 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
                 "link": gerar_link_ml(link),
                 "tem_pix": "pix" in texto_completo,
                 "mais_vendido": "vendido" in texto_completo,
-                "status": "duplicado" if ja_foi else "novo"
+                "status": "novo"
             })
         return resultados
     except Exception as e:
-        print(f"Erro ML: {e}")
+        print(f"Falha na raspagem ML: {e}")
         return []
