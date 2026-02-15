@@ -36,6 +36,34 @@ db = DB()
 amazon = AmazonScraper(os.getenv("StoreID"))
 
 async def postar_oferta(oferta):
+
+    badge = "⚡ OFERTA RELÂMPAGO ⚡\n\n" if oferta["relampago"] else ""
+
+    msg = (
+        f"{badge}"
+        f"🔥 **SUPER ACHADINHO AMAZON** 🔥\n\n"
+        f"🛍 **{oferta['titulo']}**\n\n"
+        f"💰 De: ~~{oferta['preco_antigo']}~~\n" if oferta['preco_antigo'] else ""
+    )
+
+    msg += (
+        f"✅ **Por: {oferta['preco']}**\n"
+        f"🔥 {oferta['desconto']}% OFF\n\n"
+        f"⭐ {oferta['rating']} | 🗳 {oferta['reviews']} avaliações\n\n"
+        f"🛒 **Comprar Agora:** {oferta['url']}\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
+
+    try:
+        if oferta['imagem']:
+            await client.send_file(os.getenv("MEU_CANAL"), file=oferta['imagem'], caption=msg)
+        else:
+            await client.send_message(os.getenv("MEU_CANAL"), msg)
+        return True
+    except Exception as e:
+        logging.error(f"Erro ao postar: {e}")
+        return False
+
     # Formatação limpa e profissional
     preco_final = f"✅ **Por: {oferta['preco']}**"
     if oferta['preco_antigo']:
