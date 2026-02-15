@@ -20,40 +20,34 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
             asin = produto.get("data-asin")
             if not asin: continue
 
-            # --- ESTRATÉGIA PARA PREÇO REAL (O QUE PAGA) ---
-            # 1. Procuramos primeiro o container específico do preço de fechamento
+            # --- CAPTURA EXCLUSIVA DO PREÇO FINAL ---
+            # Focamos no container 'priceToPay' que é único para o valor do fechamento
             container_pagar = produto.select_one(".priceToPay")
             
-            if container_pagar:
-                # Se achou o container oficial, pegamos o preço lá dentro
-                fração = container_pagar.select_one(".a-price-whole")
-                centavos = container_pagar.select_one(".a-price-fraction")
-            else:
-                # Fallback: tenta pegar o preço principal, mas GARANTE que não seja o 'pricePerUnit'
-                # O preço real na Amazon geralmente tem a classe 'a-size-base-plus' ou similar no grid
-                precos_gerais = produto.select(".a-price")
-                fração, centavos = None, None
-                for p in precos_gerais:
-                    # Se o preço estiver dentro de algo que indique peso/unidade, ignoramos
+            # Se não encontrar o container específico, tentamos o a-price que NÃO seja preço por unidade
+            if not container_pagar:
+                todas_tags_preco = produto.select(".a-price")
+                preco_valido = None
+                for p in todas_tags_preco:
+                    # Ignora se estiver dentro de 'pricePerUnit' ou for o preço riscado 'a-text-price'
                     if p.find_parent(class_="pricePerUnit") or p.find_parent(class_="a-text-price"):
                         continue
-                    fração = p.select_one(".a-price-whole")
-                    centavos = p.select_one(".a-price-fraction")
-                    if fração: break
+                    preco_valido = p
+                    break
+                container_pagar = preco_valido
 
+            if not container_pagar: continue
+
+            fração = container_pagar.select_one(".a-price-whole")
+            centavos = container_pagar.select_one(".a-price-fraction")
+            
             if not fração: continue
             
-            # Limpeza do valor
-            valor_final = fração.get_text(strip=True).replace(".", "").replace(",", "")
-            if centavos:
-                valor_final += f",{centavos.get_text(strip=True)}"
-
-            # --- PREÇO ANTIGO (RISCADO) ---
-            # Ele fica em um container que tem a classe 'a-text-price' e NÃO tem 'priceToPay'
-            preco_antigo_tag = produto.select_one(".a-price.a-text-price .a-offscreen")
-            preco_antigo = None
-            if preco_antigo_tag:
-                preco_antigo = preco_antigo_tag.get_text(strip=True).replace("R$", "").strip()
+            # Limpeza radical de caracteres não numéricos
+            valor_fração = re.sub(r'\D', '', fração.get_text())
+            valor_centavos = re.sub(r'\D', '', centavos.get_text()) if centavos else "00"
+            
+            valor_final = f"{valor_fração},{valor_centavos}"
 
             # --- TÍTULO E IMAGEM ---
             titulo_tag = produto.select_one("h2 span")
@@ -62,10 +56,9 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
 
             texto_todo = produto.get_text().lower()
             
-            # --- PROVA SOCIAL (EX: 10 MIL COMPRAS) ---
+            # --- PROVA SOCIAL ---
             vendas = "📦 Novo"
             if "compras no mês passado" in texto_todo:
-                # Tenta extrair o número (ex: 10 mil)
                 match_vendas = re.search(r"([\d\+]+ mil?|[\d\+]+) compras no mês passado", texto_todo)
                 if match_vendas:
                     vendas = f"📦 {match_vendas.group(1)} compras no mês passado"
@@ -74,7 +67,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
                 "id": asin,
                 "titulo": titulo_tag.get_text(strip=True),
                 "preco": valor_final,
-                "preco_antigo": preco_antigo,
+                "preco_antigo": None, # Removido conforme solicitado
                 "desconto": "OFERTA",
                 "imagem": img_tag.get("src") if img_tag else None,
                 "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
