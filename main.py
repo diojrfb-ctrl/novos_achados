@@ -33,11 +33,11 @@ client = TelegramClient(
 # FUNÇÃO DE LOG
 # =========================
 
-async def enviar_log(texto):
+async def enviar_log(texto: str):
     try:
         await client.send_message(LOG_CANAL, f"📝 LOG:\n{texto}")
     except Exception as e:
-        print("Erro ao enviar log:", e)
+        print(f"Erro ao enviar log: {e}")
 
 
 # =========================
@@ -45,20 +45,21 @@ async def enviar_log(texto):
 # =========================
 
 async def enviar_ofertas():
-
     await enviar_log("Iniciando busca de ofertas...")
 
     # -------- AMAZON --------
-    for p in buscar_amazon():
+    produtos_amazon = buscar_amazon()
+    for p in produtos_amazon:
         try:
-            msg = f"""🔥 OFERTA AMAZON
-
-🛍 {p['titulo']}
-💰 R$ {p['preco']}
-"""
+            msg = f"🔥 OFERTA AMAZON\n\n"
+            msg += f"🛍 {p['titulo']}\n"
+            msg += f"💰 R$ {p['preco']}\n"
 
             if p.get("tem_pix"):
-                msg += "⚡ Desconto no Pix\n"
+                msg += "⚡️ Desconto especial no Pix!\n"
+            
+            if p.get("tem_cupom"):
+                msg += "🎟 Verifique o cupom na página!\n"
 
             msg += f"\n🔗 Comprar:\n{p['link']}"
 
@@ -66,26 +67,24 @@ async def enviar_ofertas():
             marcar_enviado(p["id"])
 
             await enviar_log(f"Amazon enviado:\n{p['titulo']}")
-
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)  # Delay entre mensagens para evitar spam
 
         except Exception as e:
-            await enviar_log(f"Erro Amazon:\n{e}")
+            await enviar_log(f"Erro ao postar Amazon: {e}")
 
     # -------- MERCADO LIVRE --------
-    for p in buscar_mercado_livre():
+    produtos_ml = buscar_mercado_livre()
+    for p in produtos_ml:
         try:
-            msg = f"""🔥 OFERTA MERCADO LIVRE
-
-🛍 {p['titulo']}
-💰 R$ {p['preco']}
-"""
+            msg = f"🔥 OFERTA MERCADO LIVRE\n\n"
+            msg += f"🛍 {p['titulo']}\n"
+            msg += f"💰 R$ {p['preco']}\n"
 
             if p.get("tem_pix"):
-                msg += "⚡ Desconto no Pix\n"
+                msg += "⚡️ Tem desconto no Pix!\n"
 
             if p.get("mais_vendido"):
-                msg += "🏆 Mais vendido\n"
+                msg += "🏆 Um dos mais vendidos do site\n"
 
             msg += f"\n🔗 Comprar:\n{p['link']}"
 
@@ -93,11 +92,10 @@ async def enviar_ofertas():
             marcar_enviado(p["id"])
 
             await enviar_log(f"Mercado Livre enviado:\n{p['titulo']}")
-
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
 
         except Exception as e:
-            await enviar_log(f"Erro Mercado Livre:\n{e}")
+            await enviar_log(f"Erro ao postar Mercado Livre: {e}")
 
     await enviar_log("Busca finalizada.")
 
@@ -115,13 +113,14 @@ async def bot_loop():
         try:
             await enviar_ofertas()
         except Exception as e:
-            await enviar_log(f"Erro crítico no loop:\n{e}")
+            await enviar_log(f"Erro crítico no loop: {e}")
 
-        await asyncio.sleep(3600)  # 1 hora
+        # Aguarda 1 hora antes da próxima busca
+        await asyncio.sleep(3600)
 
 
 # =========================
-# FLASK (OBRIGATÓRIO PRO RENDER)
+# FLASK (MANTER O BOT ONLINE)
 # =========================
 
 app = Flask(__name__)
@@ -141,9 +140,10 @@ def run_flask():
 # =========================
 
 if __name__ == "__main__":
-
+    # Rodar Flask numa thread separada
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
+    # Rodar o bot assíncrono
     asyncio.run(bot_loop())
