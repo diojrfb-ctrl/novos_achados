@@ -20,26 +20,37 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
             asin = produto.get("data-asin")
             if not asin: continue
 
-            # --- CAPTURA DE PREÇO APERFEIÇOADA ---
-            # Buscamos especificamente o container 'priceToPay' para evitar o preço por litro/unidade
-            preco_venda_container = produto.select_one(".priceToPay .a-price") or produto.select_one(".a-price")
+            # --- ESTRATÉGIA PARA PREÇO REAL (O QUE PAGA) ---
+            # 1. Procuramos primeiro o container específico do preço de fechamento
+            container_pagar = produto.select_one(".priceToPay")
             
-            if not preco_venda_container: continue
+            if container_pagar:
+                # Se achou o container oficial, pegamos o preço lá dentro
+                fração = container_pagar.select_one(".a-price-whole")
+                centavos = container_pagar.select_one(".a-price-fraction")
+            else:
+                # Fallback: tenta pegar o preço principal, mas GARANTE que não seja o 'pricePerUnit'
+                # O preço real na Amazon geralmente tem a classe 'a-size-base-plus' ou similar no grid
+                precos_gerais = produto.select(".a-price")
+                fração, centavos = None, None
+                for p in precos_gerais:
+                    # Se o preço estiver dentro de algo que indique peso/unidade, ignoramos
+                    if p.find_parent(class_="pricePerUnit") or p.find_parent(class_="a-text-price"):
+                        continue
+                    fração = p.select_one(".a-price-whole")
+                    centavos = p.select_one(".a-price-fraction")
+                    if fração: break
 
-            fração = preco_venda_container.select_one(".a-price-whole")
-            centavos = preco_venda_container.select_one(".a-price-fraction")
-            
             if not fração: continue
             
-            # Limpeza do valor (remove pontos de milhar se houver)
+            # Limpeza do valor
             valor_final = fração.get_text(strip=True).replace(".", "").replace(",", "")
             if centavos:
                 valor_final += f",{centavos.get_text(strip=True)}"
 
-            # --- PREÇO ANTIGO (DE LISTA) ---
-            # Na Amazon, o preço antigo costuma ficar em um span separado com classe 'a-text-price'
-            # e NÃO deve estar dentro de 'priceToPay'
-            preco_antigo_tag = produto.select_one(".a-price.a-text-price:not(.priceToPay) .a-offscreen")
+            # --- PREÇO ANTIGO (RISCADO) ---
+            # Ele fica em um container que tem a classe 'a-text-price' e NÃO tem 'priceToPay'
+            preco_antigo_tag = produto.select_one(".a-price.a-text-price .a-offscreen")
             preco_antigo = None
             if preco_antigo_tag:
                 preco_antigo = preco_antigo_tag.get_text(strip=True).replace("R$", "").strip()
@@ -51,30 +62,24 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
 
             texto_todo = produto.get_text().lower()
             
-            # --- PARCELAMENTO ---
-            parcelas = "Consulte parcelamento no site"
-            # Regex para pegar algo como "10x de R$ 50,00"
-            match_parc = re.search(r"em até (\d+x.*?de\s+r\$\s?[\d,.]+)", texto_todo)
-            if match_parc: 
-                parcelas = f"Em até {match_parc.group(1)}"
-
-            # --- DESCONTO ---
-            # Tenta pegar a tag de porcentagem (ex: -15%)
-            desconto_tag = produto.select_one(".a-color-base.a-text-bold") # Comum em badges de oferta
-            porcentagem = None
-            if desconto_tag and "%" in desconto_tag.get_text():
-                porcentagem = desconto_tag.get_text(strip=True)
+            # --- PROVA SOCIAL (EX: 10 MIL COMPRAS) ---
+            vendas = "📦 Novo"
+            if "compras no mês passado" in texto_todo:
+                # Tenta extrair o número (ex: 10 mil)
+                match_vendas = re.search(r"([\d\+]+ mil?|[\d\+]+) compras no mês passado", texto_todo)
+                if match_vendas:
+                    vendas = f"📦 {match_vendas.group(1)} compras no mês passado"
 
             resultados.append({
                 "id": asin,
                 "titulo": titulo_tag.get_text(strip=True),
                 "preco": valor_final,
                 "preco_antigo": preco_antigo,
-                "desconto": porcentagem or "OFERTA",
+                "desconto": "OFERTA",
                 "imagem": img_tag.get("src") if img_tag else None,
                 "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
-                "parcelas": parcelas,
-                "vendas": "🔥 1º mais vendido" if "1º mais vendido" in texto_todo else "📦 +10 mil compras no mês passado" if "10 mil" in texto_todo else "📦 Novo",
+                "parcelas": "Consulte no site",
+                "vendas": vendas,
                 "avaliacao": "⭐ Ver avaliações" if "estrelas" in texto_todo else None,
                 "status": "duplicado" if ja_enviado(asin) else "novo"
             })
