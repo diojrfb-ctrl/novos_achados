@@ -49,62 +49,73 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
         return
 
     novos = [p for p in produtos if p.get('status') == "novo"]
-    
     await enviar_log(f"📊 **{nome}**: {len(novos)} ofertas novas encontradas.")
 
     for p in novos:
         try:
-            # Identifica Categoria e Tag
             categoria_full = identificar_categoria(p['titulo'])
-            tag_unica = categoria_full.split(" ")[1] # Ex: #Gamer
+            tag_unica = categoria_full.split(" ")[1]
 
-            # Layout Visual Profissional
-            msg = f"{categoria_full}\n\n"
-            msg += f"🛍 **{p['titulo']}**\n\n"
-            
-            msg += f"💰 **POR APENAS: R$ {p['preco']}**\n"
-            
+            # --- CONSTRUÇÃO DO LAYOUT ---
+            caption = (
+                f"{categoria_full}\n\n"
+                f"🛍 **{p['titulo']}**\n"
+                f"────────────────────\n\n"
+                f"💰 **POR APENAS: R$ {p['preco']}**\n"
+            )
+
             if p.get("tem_pix"):
-                msg += "⚡️ *Preço especial no PIX*\n"
+                caption += "⚡️ *Preço especial no PIX/Boleto*\n"
             if p.get("tem_cupom"):
-                msg += "🎟 *Ative o cupom na página*\n"
+                caption += "🎟 *Ative o cupom na página*\n"
             
-            msg += f"\n🛒 **COMPRE AQUI:**\n{p['link']}\n\n"
-            
-            msg += f"────────────────────\n"
-            msg += f"🔍 Ver mais como este: {tag_unica}"
+            caption += (
+                f"\n🔥 **CORRA! O PREÇO PODE MUDAR**\n"
+                f"🛒 **COMPRE AQUI:** {p['link']}\n\n"
+                f"────────────────────\n"
+                f"🔍 Ver mais parecidos: {tag_unica}"
+            )
 
             if not modo_teste:
-                await client.send_message(MEU_CANAL, msg)
+                # Envio com foto (caption vira a legenda)
+                if p.get("imagem"):
+                    await client.send_file(MEU_CANAL, p["imagem"], caption=caption)
+                else:
+                    await client.send_message(MEU_CANAL, caption)
+                
                 marcar_enviado(p["id"])
                 
-                # Cooldown Aleatório para não encher notificações
-                delay = random.randint(120, 300) # 2 a 5 minutos
-                print(f"[LOG] {nome} postado. Pausa de {delay}s.")
+                # Cooldown de 2 a 5 min
+                delay = random.randint(120, 300)
+                print(f"[LOG] Postado. Aguardando {delay}s...")
                 await asyncio.sleep(delay)
             else:
-                await enviar_log(f"🧪 **PREVIEW TESTE**:\n{msg}")
-                await asyncio.sleep(2)
+                # Preview no canal de Log
+                if p.get("imagem"):
+                    await client.send_file(LOG_CANAL, p["imagem"], caption=f"🧪 **TESTE VISUAL**\n{caption}")
+                else:
+                    await enviar_log(f"🧪 **TESTE SEM FOTO**\n{caption}")
+                await asyncio.sleep(5)
 
         except Exception as e:
             await enviar_log(f"⚠️ Erro ao postar {p.get('id')}: {e}")
 
 @client.on(events.NewMessage(pattern='/testar'))
 async def handler_teste(event):
-    await event.reply("🧪 Iniciando varredura de teste rápida...")
+    await event.reply("🧪 Iniciando varredura de teste com fotos...")
     await executar_ciclo(modo_teste=True)
 
 async def executar_ciclo(modo_teste: bool = False):
+    # Amazon
     amz = buscar_amazon()
     await processar_plataforma("AMAZON", amz, modo_teste)
-    
+    # ML
     ml = buscar_mercado_livre()
     await processar_plataforma("MERCADO LIVRE", ml, modo_teste)
 
 async def main():
     await client.start()
-    await enviar_log("✅ **Bot Online!** Categorias e Cooldown ativos.")
-    
+    await enviar_log("✅ **Bot Online!** Fotos e Categorias ativas.")
     while True:
         try:
             await executar_ciclo(modo_teste=False)

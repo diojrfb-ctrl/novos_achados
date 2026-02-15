@@ -16,7 +16,6 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
         resultados = []
         for item in items:
             if len(resultados) >= limite: break
-
             link_tag = item.select_one("a")
             if not link_tag or not link_tag.get("href"): continue
             
@@ -26,6 +25,8 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
 
             titulo_tag = item.select_one(".ui-search-item__title") or item.select_one(".poly-component__title")
             preco_tag = item.select_one(".andes-money-amount__fraction")
+            img_tag = item.select_one("img")
+
             if not titulo_tag or not preco_tag: continue
 
             resultados.append({
@@ -33,6 +34,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
                 "titulo": titulo_tag.get_text(strip=True),
                 "preco": preco_tag.get_text(strip=True),
                 "link": f"{link_raw}?matt_tool={MATT_TOOL}",
+                "imagem": img_tag.get("data-src") or img_tag.get("src") if img_tag else None,
                 "tem_pix": "pix" in item.get_text().lower(),
                 "status": "duplicado" if ja_enviado(prod_id) else "novo"
             })

@@ -10,27 +10,27 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
         if response.status_code != 200: return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
+        produtos = soup.find_all("div", {"data-component-type": "s-search-result"}) or \
+                   soup.select(".s-result-item[data-asin]")
         
         resultados = []
         for produto in produtos:
             if len(resultados) >= limite: break
-
             asin = produto.get("data-asin")
-            if not asin: continue
+            if not asin or len(asin) < 5: continue
 
-            titulo_tag = produto.select_one("h2 span")
+            titulo_tag = produto.select_one("h2 span") or produto.select_one(".a-size-base-plus")
             preco_tag = produto.select_one(".a-price-whole")
-            if not titulo_tag or not preco_tag: continue
+            img_tag = produto.select_one(".s-image")
 
-            # Link Reduzido Limpo
-            link_curto = f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}"
+            if not titulo_tag or not preco_tag: continue
 
             resultados.append({
                 "id": asin,
                 "titulo": titulo_tag.get_text(strip=True),
                 "preco": preco_tag.get_text(strip=True),
-                "link": link_curto,
+                "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
+                "imagem": img_tag["src"] if img_tag else None,
                 "tem_pix": "pix" in produto.get_text().lower(),
                 "status": "duplicado" if ja_enviado(asin) else "novo"
             })
