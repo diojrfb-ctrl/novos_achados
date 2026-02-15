@@ -23,29 +23,44 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             prod_id = extrair_mlb(link)
             if not prod_id: continue
 
+            # Captura de Imagem Original
             img_tag = item.select_one("img")
-            img_url = None
-            if img_tag:
-                img_url = img_tag.get("data-src") or img_tag.get("src")
-                if img_url:
-                    # Força o formato de imagem original e limpa a URL
-                    img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
-                    if img_url.startswith("//"): img_url = "https:" + img_url
+            img_url = img_tag.get("data-src") or img_tag.get("src") if img_tag else None
+            if img_url:
+                img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
 
-            titulo_tag = item.select_one(".poly-component__title") or item.select_one(".ui-search-item__title")
-            preco_tag = item.select_one(".andes-money-amount__fraction")
-            parc_tag = item.select_one(".poly-component__installments") or item.select_one(".ui-search-item__group__element")
+            # Detalhes do Produto
+            titulo = item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True)
+            
+            # Lógica de Preços Detalhada
+            preco_venda = item.select_one(".andes-money-amount__fraction").get_text(strip=True)
+            
+            # Tenta capturar selos e informações extras
+            texto_item = item.get_text(" ", strip=True).lower()
+            
+            desconto_pix = None
+            if "off no pix" in texto_item or "pix" in texto_item:
+                # Tenta achar a porcentagem real (ex: 49% OFF)
+                tag_off = item.select_one(".andes-money-amount__discount, .ui-search-price__discount")
+                desconto_pix = tag_off.get_text(strip=True) if tag_off else "Desconto"
 
-            if not titulo_tag or not preco_tag: continue
+            vendas = "Novo"
+            if "+10mil vendidos" in texto_item: vendas = "🔥 +10mil vendidos"
+            elif "vendidos" in texto_item: vendas = "✅ Destaque em vendas"
+
+            avaliacao = "⭐ 4.8+" if "4." in texto_item else None
 
             resultados.append({
                 "id": prod_id,
-                "titulo": titulo_tag.get_text(strip=True),
-                "preco": preco_tag.get_text(strip=True),
+                "titulo": titulo,
+                "preco": preco_venda,
+                "preco_pix": preco_venda, # O ML costuma mostrar o menor preço na fração principal
+                "desconto": desconto_pix,
                 "imagem": img_url,
                 "link": f"{link}&matt_tool={MATT_TOOL}",
-                "parcelas": parc_tag.get_text(strip=True) if parc_tag else "Consulte parcelas no site",
-                "tem_pix": "pix" in item.get_text().lower(),
+                "vendas": vendas,
+                "avaliacao": avaliacao,
+                "parcelas": item.select_one(".poly-component__installments").get_text(strip=True) if item.select_one(".poly-component__installments") else "Confira parcelas",
                 "status": "duplicado" if ja_enviado(prod_id) else "novo"
             })
         return resultados
