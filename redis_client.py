@@ -1,11 +1,9 @@
-import redis
+from upstash_redis import Redis
 from config import UPSTASH_URL, UPSTASH_TOKEN
 
-redis_client = redis.Redis(
-    host=UPSTASH_URL.replace("https://", "").replace("http://", ""),
-    password=UPSTASH_TOKEN,
-    port=6379,
-    ssl=True
+redis_client = Redis(
+    url=UPSTASH_URL,
+    token=UPSTASH_TOKEN
 )
 
 def ja_enviado(prod_id):
