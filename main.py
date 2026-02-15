@@ -21,6 +21,43 @@ def definir_tag(titulo: str) -> str:
 async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
     novos = [p for p in produtos if p.get('status') == "novo"]
     
+    for p in novos:
+        tag = definir_tag(p['titulo'])
+        
+        # Montagem da legenda (Caption)
+        caption = (
+            f"🔥 **{p['titulo']}**\n\n"
+            f"💰 **R$ {p['preco']}**\n"
+            f"💳 {p['parcelas']}\n"
+        )
+        if p['tem_pix']: 
+            caption += "⚡️ 15% de desconto no PIX\n"
+        
+        caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
+        caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
+
+        try:
+            if p['imagem'] and p['imagem'].startswith("http"):
+                # Envia como foto com legenda
+                await client.send_file(
+                    MEU_CANAL, 
+                    p['imagem'], 
+                    caption=caption,
+                    parse_mode='md' # Garante que o negrito funcione
+                )
+            else:
+                # Se não tiver imagem, envia só texto
+                await client.send_message(MEU_CANAL, caption, parse_mode='md')
+            
+            marcar_enviado(p["id"])
+            
+            # Intervalo para não bombardear o usuário
+            await asyncio.sleep(12) 
+            
+        except Exception as e:
+            await enviar_log(f"⚠️ Erro ao postar item {p['id']}: {e}")
+    novos = [p for p in produtos if p.get('status') == "novo"]
+    
     # Log de relatório no canal de logs
     await client.send_message(LOG_CANAL, f"📊 **RELATÓRIO {nome}:** {len(novos)} novos encontrados.")
 

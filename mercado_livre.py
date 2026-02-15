@@ -23,7 +23,15 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             prod_id = extrair_mlb(link)
             if not prod_id: continue
 
+            # Captura da imagem com fallback para data-src (lazy load)
             img_tag = item.select_one("img")
+            img_url = None
+            if img_tag:
+                img_url = img_tag.get("data-src") or img_tag.get("src")
+                # Limpeza: Se a imagem for muito pequena ou webp de miniatura, tentamos o formato padrão
+                if img_url and "D_NQ_CP" in img_url:
+                    img_url = img_url.replace("-I.jpg", "-O.jpg") # Troca miniatura por imagem original
+
             titulo_tag = item.select_one(".poly-component__title") or item.select_one(".ui-search-item__title")
             preco_tag = item.select_one(".andes-money-amount__fraction")
             parc_tag = item.select_one(".poly-component__installments") or item.select_one(".ui-search-item__group__element")
@@ -34,7 +42,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
                 "id": prod_id,
                 "titulo": titulo_tag.get_text(strip=True),
                 "preco": preco_tag.get_text(strip=True),
-                "imagem": img_tag.get("src") or img_tag.get("data-src") if img_tag else None,
+                "imagem": img_url,
                 "link": f"{link}&matt_tool={MATT_TOOL}",
                 "parcelas": parc_tag.get_text(strip=True) if parc_tag else "Consulte parcelas",
                 "tem_pix": "pix" in item.get_text().lower(),
