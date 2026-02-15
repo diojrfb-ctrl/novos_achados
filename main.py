@@ -1,72 +1,79 @@
-import asyncio, threading, os, io, requests
-from flask import Flask
-from telethon import TelegramClient, events
-from telethon.sessions import StringSession
-from config import API_ID, API_HASH, STRING_SESSION, MEU_CANAL, LOG_CANAL
-from redis_client import marcar_enviado
-from amazon import buscar_amazon
-from mercado_livre import buscar_mercado_livre
+from curl_cffi import requests
+from bs4 import BeautifulSoup
+import time, random, re
+from config import HEADERS, AMAZON_TAG
+from redis_client import ja_enviado
 
-client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
+    url = f"https://www.amazon.com.br/s?k={termo}"
+    try:
+        time.sleep(random.uniform(1, 3))
+        response = requests.get(url, headers=HEADERS, impersonate="chrome124", timeout=20)
+        if response.status_code != 200: return []
 
-def definir_tag(titulo: str) -> str:
-    t = titulo.lower()
-    if any(x in t for x in ["piscina", "casa", "cozinha", "cadeira"]): return "Casa"
-    if any(x in t for x in ["tv", "smart", "led", "monitor"]): return "Eletrônicos"
-    if any(x in t for x in ["gamer", "ps5", "nintendo", "xbox"]): return "Gamer"
-    return "Ofertas"
+        soup = BeautifulSoup(response.text, "html.parser")
+        produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
+        
+        resultados = []
+        for produto in produtos:
+            if len(resultados) >= limite: break
+            asin = produto.get("data-asin")
+            if not asin: continue
 
-async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
-    novos = [p for p in produtos if p.get('status') == "novo"]
-    for p in novos:
-        try:
-            tag = definir_tag(p['titulo'])
+            # --- CAPTURA DE PREÇO E DESCONTO ---
+            # Preço Atual (o que o cliente paga)
+            preco_venda_container = produto.select_one(".a-price")
+            fração = produto.select_one(".a-price-whole")
+            centavos = produto.select_one(".a-price-fraction")
             
-            # Legenda conforme o padrão solicitado
-            caption = f"🔥 **{p['titulo']}**\n"
-            if p.get('avaliacao'): caption += f"{p['avaliacao']}\n"
-            caption += f"{p['vendas']}\n\n"
+            if not fração: continue # Se não tem preço, pula o produto
             
-            if p.get('preco_antigo'):
-                caption += f"💰 ~~R$ {p['preco_antigo']}~~\n"
-                caption += f"✅ **R$ {p['preco']}** ({p['desconto']})\n"
-            else:
-                caption += f"💰 **R$ {p['preco']}**\n"
-                
-            caption += f"💳 {p['parcelas']}\n"
-            caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
-            caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
+            valor_final = fração.get_text(strip=True).replace(".", "")
+            if centavos:
+                valor_final += f",{centavos.get_text(strip=True)}"
 
-            # Envio da imagem baixada
-            if p.get("imagem"):
-                r = requests.get(p["imagem"], timeout=10)
-                if r.status_code == 200:
-                    foto = io.BytesIO(r.content)
-                    foto.name = 'produto.jpg'
-                    await client.send_file(MEU_CANAL, foto, caption=caption, parse_mode='md')
-                else:
-                    await client.send_message(MEU_CANAL, caption, parse_mode='md')
+            # Preço Antigo (Preço de Lista / Riscado)
+            preco_antigo_tag = produto.select_one(".a-price.a-text-price .a-offscreen")
+            preco_antigo = None
+            if preco_antigo_tag:
+                # Remove o "R$" e espaços para padronizar
+                preco_antigo = preco_antigo_tag.get_text(strip=True).replace("R$", "").strip()
+
+            # Desconto (Cálculo ou Tag)
+            desconto_tag = produto.select_one(".a-letterpress") # Às vezes aparece como "10% de desconto"
+            porcentagem = desconto_tag.get_text(strip=True) if desconto_tag else None
             
-            if not modo_teste: marcar_enviado(p["id"])
-            await asyncio.sleep(15) # Intervalo de postagem
+            # Se não achou a tag de desconto mas tem preço antigo, podemos deixar o bot calcular 
+            # ou apenas exibir o preço riscado.
 
-        except Exception as e:
-            print(f"Erro ao postar: {e}")
-
-async def main():
-    await client.start()
-    while True:
-        try:
-            produtos_ml = buscar_mercado_livre()
-            await processar_plataforma("MERCADO LIVRE", produtos_ml)
+            # --- TÍTULO E IMAGEM ---
+            titulo_tag = produto.select_one("h2 span")
+            img_tag = produto.select_one(".s-image")
             
-            produtos_amz = buscar_amazon()
-            await processar_plataforma("AMAZON", produtos_amz)
-        except Exception as e:
-            print(f"Erro no loop: {e}")
-        await asyncio.sleep(3600)
+            if not titulo_tag: continue
 
-if __name__ == "__main__":
-    t = threading.Thread(target=lambda: Flask(__name__).run(host="0.0.0.0", port=10000), daemon=True)
-    t.start()
-    asyncio.run(main())
+            texto_todo = produto.get_text().lower()
+            
+            # --- PARCELAMENTO ---
+            parcelas = "Consulte parcelamento no site"
+            match_parc = re.search(r"em até (\d+x.*?de\s+r\$\s?[\d,.]+)", texto_todo)
+            if match_parc: 
+                parcelas = f"Em até {match_parc.group(1)}"
+
+            resultados.append({
+                "id": asin,
+                "titulo": titulo_tag.get_text(strip=True),
+                "preco": valor_final,
+                "preco_antigo": preco_antigo,
+                "desconto": porcentagem,
+                "imagem": img_tag.get("src") if img_tag else None,
+                "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
+                "parcelas": parcelas,
+                "vendas": "🔥 Oferta em destaque" if "mais vendido" in texto_todo else "📦 Novo",
+                "avaliacao": "⭐ Ver avaliações" if "estrelas" in texto_todo else None,
+                "status": "duplicado" if ja_enviado(asin) else "novo"
+            })
+        return resultados
+    except Exception as e:
+        print(f"Erro Amazon: {e}")
+        return []

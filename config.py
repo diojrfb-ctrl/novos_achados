@@ -4,6 +4,7 @@ API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 STRING_SESSION = os.getenv("STRING_SESSION")
 MEU_CANAL = os.getenv("MEU_CANAL")
+CANAL_TESTE = "@canaltesteachados"
 LOG_CANAL = os.getenv("LOG_CANAL")
 AMAZON_TAG = os.getenv("StoreID")
 MATT_TOOL = "74449748"
