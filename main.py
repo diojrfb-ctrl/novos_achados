@@ -11,9 +11,9 @@ client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 def definir_tag(titulo: str) -> str:
     t = titulo.lower()
-    if any(x in t for x in ["piscina", "casa", "cozinha", "mesa", "cadeira"]): return "Casa"
-    if any(x in t for x in ["tv", "smart tv", "led", "monitor"]): return "Eletrônicos"
-    if any(x in t for x in ["gamer", "ps5", "nintendo", "pc"]): return "Gamer"
+    if any(x in t for x in ["piscina", "casa", "cozinha", "penteadeira"]): return "Casa"
+    if any(x in t for x in ["carro", "pneu", "moto"]): return "Veículos"
+    if any(x in t for x in ["tv", "led", "smart", "monitor"]): return "Eletrônicos"
     return "Ofertas"
 
 async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
@@ -22,22 +22,22 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
         try:
             tag = definir_tag(p['titulo'])
             
-            # Montagem da Mensagem Detalhada
+            # Montagem do Texto conforme o exemplo solicitado
             caption = f"🔥 **{p['titulo']}**\n"
             if p.get('avaliacao'): caption += f"{p['avaliacao']}\n"
-            if p.get('vendas'): caption += f"{p['vendas']}\n"
+            caption += f"{p['vendas']}\n\n"
             
             if p.get('preco_antigo'):
-                caption += f"\n❌ De: ~~R$ {p['preco_antigo']}~~\n"
-                caption += f"✅ **Por: R$ {p['preco']}** ({p['desconto']})\n"
+                caption += f"💰 ~~R$ {p['preco_antigo']}~~\n"
+                caption += f"✅ **R$ {p['preco']}** ({p['desconto']})\n"
             else:
-                caption += f"\n💰 **R$ {p['preco']}**\n"
-            
+                caption += f"💰 **R$ {p['preco']}**\n"
+                
             caption += f"💳 {p['parcelas']}\n"
             caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
             caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
 
-            # Envio com imagem baixada para garantir exibição
+            # Download da imagem para evitar "Webpage media empty"
             if p.get("imagem"):
                 r = requests.get(p["imagem"], timeout=10)
                 if r.status_code == 200:
@@ -47,9 +47,8 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
                 else:
                     await client.send_message(MEU_CANAL, caption, parse_mode='md')
             
-            if not modo_teste:
-                marcar_enviado(p["id"])
-            await asyncio.sleep(15) # Anti-spam
+            if not modo_teste: marcar_enviado(p["id"])
+            await asyncio.sleep(15) # Intervalo de segurança
 
         except Exception as e:
             print(f"Erro ao postar: {e}")
@@ -68,5 +67,6 @@ async def main():
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    # Inicia Flask (simplicado para o exemplo)
+    t = threading.Thread(target=lambda: Flask(__name__).run(host="0.0.0.0", port=10000), daemon=True)
+    t.start()
     asyncio.run(main())
