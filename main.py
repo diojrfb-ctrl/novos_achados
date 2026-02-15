@@ -38,7 +38,89 @@ async def enviar_log(texto: str):
         print(f"Erro ao enviar log: {e}")
 
 async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
-    """Processa a lista de produtos, gera relatório de log e posta se necessário."""
+    """
+    Processa a lista de produtos capturados, gera relatórios técnicos detalhados 
+    no canal de logs e gerencia a postagem no canal de ofertas.
+    """
+    
+    # 1. LOG DE DIAGNÓSTICO INICIAL
+    if not produtos:
+        # Se a lista está vazia, o problema é na raspagem (HTML/Bloqueio)
+        msg_erro = (
+            f"❌ **FALHA DE CAPTURA: {nome}**\n\n"
+            f"**Status:** Nenhum dado extraído.\n"
+            f"**Possíveis Causas:**\n"
+            f"1. IP do Render bloqueado pelo WAF (403 Forbidden).\n"
+            f"2. O site exibiu um Captcha em vez da lista de produtos.\n"
+            f"3. Os Seletores CSS (BeautifulSoup) estão desatualizados.\n"
+            f"**Sugestão:** Verifique os logs do console no Render para ver o Status Code."
+        )
+        await enviar_log(msg_erro)
+        return
+
+    # 2. SEPARAÇÃO DE DADOS (NOVOS VS DUPLICADOS)
+    # Filtramos baseado no campo 'status' que as funções de busca preenchem
+    novos = [p for p in produtos if p.get('status') == "novo"]
+    duplicados = [p for p in produtos if p.get('status') == "duplicado"]
+
+    # 3. CONSTRUÇÃO DO RELATÓRIO DETALHADO PARA O CANAL DE LOGS
+    tipo_operacao = "🧪 MODO TESTE" if modo_teste else "📡 VARREDURA AUTOMÁTICA"
+    
+    relatorio = f"📊 **RELATÓRIO TÉCNICO: {nome}**\n"
+    relatorio += f"**Contexto:** {tipo_operacao}\n"
+    relatorio += f"────────────────────\n"
+    relatorio += f"📦 **Total Analisado:** {len(produtos)} itens\n"
+    relatorio += f"✅ **Aptos para Postar:** {len(novos)}\n"
+    relatorio += f"♻️ **Já Enviados (Redis):** {len(duplicados)}\n\n"
+
+    if novos:
+        relatorio += "📝 **Preview dos itens capturados:**\n"
+        for idx, p in enumerate(novos[:5], 1): # Mostra os 5 primeiros para não inundar o log
+            pix = "⚡️[PIX]" if p.get('tem_pix') else ""
+            relatorio += f"{idx}. {p['titulo'][:35]}... | R$ {p['preco']} {pix}\n"
+    else:
+        relatorio += "ℹ️ *Nenhuma oferta nova encontrada nesta rodada.*\n"
+
+    # Envia o relatório detalhado ao canal de logs
+    await enviar_log(relatorio)
+
+    # 4. LÓGICA DE POSTAGEM (PULA SE FOR MODO TESTE)
+    if modo_teste:
+        await enviar_log(f"ℹ️ **{nome}**: Simulação finalizada. Nada foi enviado ao canal principal.")
+        return
+
+    # Se não for teste, percorre a lista de novos e envia ao canal principal
+    for p in novos:
+        try:
+            # Montagem da mensagem formatada para o usuário final
+            msg_canal = f"🔥 **OFERTA {nome}**\n\n"
+            msg_canal += f"🛍 {p['titulo']}\n"
+            msg_canal += f"💰 **R$ {p['preco']}**\n\n"
+            
+            # Adição de selos de destaque
+            if p.get("tem_pix"):
+                msg_canal += "⚡️ Desconto especial no Pix!\n"
+            if p.get("tem_cupom"):
+                msg_canal += "🎟 Verifique o cupom na página!\n"
+            if p.get("mais_vendido"):
+                msg_canal += "🏆 Destaque: Um dos mais vendidos!\n"
+
+            msg_canal += f"\n🔗 **Compre aqui:**\n{p['link']}"
+
+            # Envio para o Canal Principal
+            await client.send_message(MEU_CANAL, msg_canal)
+            
+            # Salva no Redis para nunca repetir este ID
+            marcar_enviado(p["id"])
+            
+            # Log de sucesso individual
+            print(f"[OK] Postado: {p['id']}")
+            
+            # Anti-Spam: espera 5 segundos entre uma oferta e outra
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            await enviar_log(f"⚠️ **ERRO AO POSTAR ITEM:**\nID: {p.get('id')}\nErro: {str(e)}")    """Processa a lista de produtos, gera relatório de log e posta se necessário."""
     
     if not produtos:
         await enviar_log(f"❌ **{nome}**: Nenhum produto encontrado. Verifique os seletores.")

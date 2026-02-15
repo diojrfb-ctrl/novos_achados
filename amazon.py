@@ -1,22 +1,27 @@
-import requests
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 from config import HEADERS, AMAZON_TAG
 from utils import extrair_asin
 from redis_client import ja_enviado
 
 def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
-    # URL com parâmetros que simulam uma busca orgânica
-    url = f"https://www.amazon.com.br/s?k={termo}&ref=nb_sb_noss"
+    url = f"https://www.amazon.com.br/s?k={termo}"
     
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        # curl_cffi imita o Chrome 120 perfeitamente
+        response = requests.get(url, headers=HEADERS, impersonate="chrome120", timeout=15)
+        
+        print(f"[LOG AMAZON] Status: {response.status_code}")
+        
         if response.status_code != 200:
+            print(f"[LOG AMAZON] Erro de acesso. Status: {response.status_code}")
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        # Seleciona os containers de produtos
         produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
         
+        print(f"[LOG AMAZON] Itens brutos encontrados: {len(produtos)}")
+
         resultados = []
         for produto in produtos:
             if len(resultados) >= limite: break
@@ -24,27 +29,23 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 10) -> list[dict]:
             asin = produto.get("data-asin")
             if not asin: continue
 
-            # Tenta pegar o título de várias formas
-            titulo_tag = produto.select_one("h2 span") or produto.select_one(".a-size-base-plus")
-            if not titulo_tag: continue
-            titulo = titulo_tag.get_text(strip=True)
-
-            # Tenta pegar o preço
+            titulo_tag = produto.select_one("h2 span")
             preco_tag = produto.select_one(".a-price-whole")
-            if not preco_tag: continue
-            preco = preco_tag.get_text(strip=True)
 
-            status = "duplicado" if ja_enviado(asin) else "novo"
-            texto_todo = produto.get_text(" ").lower()
+            if not titulo_tag or not preco_tag:
+                continue
 
+            # OK: Produto válido capturado
             resultados.append({
                 "id": asin,
-                "titulo": titulo,
-                "preco": preco,
+                "titulo": titulo_tag.get_text(strip=True),
+                "preco": preco_tag.get_text(strip=True),
                 "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
-                "tem_pix": "pix" in texto_todo or "boleto" in texto_todo,
-                "status": status
+                "tem_pix": "pix" in produto.get_text().lower(),
+                "status": "duplicado" if ja_enviado(asin) else "novo"
             })
+            
         return resultados
-    except:
+    except Exception as e:
+        print(f"[LOG AMAZON] Erro crítico: {e}")
         return []
