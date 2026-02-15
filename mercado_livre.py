@@ -23,18 +23,14 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             prod_id = extrair_mlb(link)
             if not prod_id: continue
 
-            # --- MELHORIA NA CAPTURA DA IMAGEM ---
             img_tag = item.select_one("img")
             img_url = None
             if img_tag:
                 img_url = img_tag.get("data-src") or img_tag.get("src")
                 if img_url:
-                    # Remove extensões webp e variações de miniatura
-                    # Forçamos o sufixo -O.jpg que o Telegram reconhece como FOTO
-                    img_url = img_url.split("?")[0] # Remove parâmetros extras
-                    img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg").replace("-X.jpg", "-O.jpg")
-                    if not img_url.endswith(".jpg"):
-                        img_url = img_url.split(".")[0] + ".jpg"
+                    # Força o formato de imagem original e limpa a URL
+                    img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
+                    if img_url.startswith("//"): img_url = "https:" + img_url
 
             titulo_tag = item.select_one(".poly-component__title") or item.select_one(".ui-search-item__title")
             preco_tag = item.select_one(".andes-money-amount__fraction")
@@ -48,7 +44,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
                 "preco": preco_tag.get_text(strip=True),
                 "imagem": img_url,
                 "link": f"{link}&matt_tool={MATT_TOOL}",
-                "parcelas": parc_tag.get_text(strip=True) if parc_tag else "Consulte parcelas",
+                "parcelas": parc_tag.get_text(strip=True) if parc_tag else "Consulte parcelas no site",
                 "tem_pix": "pix" in item.get_text().lower(),
                 "status": "duplicado" if ja_enviado(prod_id) else "novo"
             })
