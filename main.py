@@ -1,109 +1,96 @@
-import asyncio, threading, os
+import asyncio
+import threading
+import os
+from flask import Flask
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from flask import Flask
 
-from config import *
+from config import API_ID, API_HASH, STRING_SESSION, MEU_CANAL, LOG_CANAL
 from redis_client import marcar_enviado
 from amazon import buscar_amazon
 from mercado_livre import buscar_mercado_livre
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
+# Mapeamento de Categorias
 def definir_tag(titulo: str) -> str:
     t = titulo.lower()
-    if any(x in t for x in ["iphone", "celular", "samsung", "xiaomi"]): return "Smartphone"
-    if any(x in t for x in ["gamer", "mouse", "teclado", "placa"]): return "Gamer"
-    if any(x in t for x in ["cerveja", "vinho", "whisky", "bis", "chocolate"]): return "Mercado"
-    if any(x in t for x in ["piscina", "cadeira", "mesa", "limpeza", "fritadeira"]): return "Casa"
-    return "Ofertas"
+    if any(x in t for x in ["piscina", "mesa", "cadeira", "casa", "limpeza"]): return "Casa"
+    if any(x in t for x in ["celular", "samsung", "iphone", "xiaomi"]): return "Smartphone"
+    if any(x in t for x in ["gamer", "mouse", "teclado", "pc", "monitor"]): return "Gamer"
+    if any(x in t for x in ["carro", "pneu", "automotivo"]): return "Carro"
+    return "Acessórios"
+
+async def enviar_log(texto: str):
+    try:
+        await client.send_message(LOG_CANAL, texto)
+    except Exception as e:
+        print(f"Erro ao enviar log: {e}")
 
 async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
     novos = [p for p in produtos if p.get('status') == "novo"]
     
-    for p in novos:
-        tag = definir_tag(p['titulo'])
-        
-        # Montagem da legenda (Caption)
-        caption = (
-            f"🔥 **{p['titulo']}**\n\n"
-            f"💰 **R$ {p['preco']}**\n"
-            f"💳 {p['parcelas']}\n"
-        )
-        if p['tem_pix']: 
-            caption += "⚡️ 15% de desconto no PIX\n"
-        
-        caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
-        caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
-
-        try:
-            if p['imagem'] and p['imagem'].startswith("http"):
-                # Envia como foto com legenda
-                await client.send_file(
-                    MEU_CANAL, 
-                    p['imagem'], 
-                    caption=caption,
-                    parse_mode='md' # Garante que o negrito funcione
+    if not modo_teste:
+        for p in novos:
+            try:
+                tag = definir_tag(p['titulo'])
+                
+                # Montagem do Texto (Caption)
+                caption = (
+                    f"🔥 **{p['titulo']}**\n\n"
+                    f"💰 **R$ {p['preco']}**\n"
+                    f"💳 {p['parcelas']}\n"
                 )
-            else:
-                # Se não tiver imagem, envia só texto
-                await client.send_message(MEU_CANAL, caption, parse_mode='md')
-            
-            marcar_enviado(p["id"])
-            
-            # Intervalo para não bombardear o usuário
-            await asyncio.sleep(12) 
-            
-        except Exception as e:
-            await enviar_log(f"⚠️ Erro ao postar item {p['id']}: {e}")
-    novos = [p for p in produtos if p.get('status') == "novo"]
+                if p.get("tem_pix"):
+                    caption += "⚡️ 15% de desconto no pix\n"
+                
+                caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
+                caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
+
+                # ENVIO CORRIGIDO: Foto + Legenda
+                if p.get("imagem"):
+                    await client.send_file(
+                        MEU_CANAL, 
+                        p["imagem"], 
+                        caption=caption,
+                        parse_mode='md' # Garante que o Markdown funcione na legenda
+                    )
+                else:
+                    await client.send_message(MEU_CANAL, caption)
+                
+                marcar_enviado(p["id"])
+                
+                # INTERVALO ENTRE POSTAGENS (15 segundos)
+                await asyncio.sleep(15)
+
+            except Exception as e:
+                print(f"Erro ao postar item {p.get('id')}: {e}")
     
-    # Log de relatório no canal de logs
-    await client.send_message(LOG_CANAL, f"📊 **RELATÓRIO {nome}:** {len(novos)} novos encontrados.")
+    # Envio de relatório para o log (simplificado)
+    await enviar_log(f"📊 **RELATÓRIO {nome}:** {len(novos)} novos itens processados.")
 
-    for p in novos:
-        tag = definir_tag(p['titulo'])
-        
-        # Montagem da Mensagem
-        caption = (
-            f"🔥 **{p['titulo']}**\n\n"
-            f"💰 **R$ {p['preco']}**\n"
-            f"💳 {p['parcelas']}\n"
-        )
-        if p['tem_pix']: caption += "⚡️ Desconto especial no PIX!\n"
-        
-        caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
-        caption += f"➡️ Ver mais parecidos: #{tag}"
+@client.on(events.NewMessage(pattern='/testar'))
+async def handler_teste(event):
+    await event.reply("🧪 Teste iniciado!")
+    await executar_ciclo(modo_teste=True)
 
-        try:
-            # Envia com FOTO
-            if p['imagem']:
-                await client.send_file(MEU_CANAL, p['imagem'], caption=caption)
-            else:
-                await client.send_message(MEU_CANAL, caption)
-            
-            marcar_enviado(p["id"])
-            
-            # INTERVALO DE 10 SEGUNDOS para não bombardear o usuário
-            await asyncio.sleep(10) 
-            
-        except Exception as e:
-            print(f"Erro ao postar: {e}")
-
-async def executar_ciclo(modo_teste=False):
+async def executar_ciclo(modo_teste: bool = False):
     await processar_plataforma("AMAZON", buscar_amazon(), modo_teste)
     await processar_plataforma("MERCADO LIVRE", buscar_mercado_livre(), modo_teste)
 
 async def main():
     await client.start()
+    await enviar_log("✅ **Bot Online!**")
     while True:
-        await executar_ciclo()
-        await asyncio.sleep(3600) # 1 hora entre varreduras
+        try:
+            await executar_ciclo(modo_teste=False)
+        except Exception as e:
+            print(f"Erro no loop: {e}")
+        await asyncio.sleep(3600)
 
-# Servidor Flask para o Render
 app = Flask(__name__)
 @app.route("/")
-def h(): return "Bot ON"
+def home(): return "Bot Ativo"
 
 if __name__ == "__main__":
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
