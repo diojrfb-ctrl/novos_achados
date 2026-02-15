@@ -24,28 +24,39 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             prod_id = extrair_mlb(link)
             if not prod_id: continue
 
-            # --- CAPTURA DE PREÇO E DESCONTO (Conforme a DIV enviada) ---
-            # Preço atual (Fração + Centavos)
-            fração = item.select_one(".andes-money-amount__fraction")
-            centavos = item.select_one(".andes-money-amount__cents")
+            # --- CAPTURA DE PREÇO CORRIGIDA ---
+            
+            # 1. Primeiro, buscamos o container do preço ATUAL. 
+            # O ML geralmente usa metadata ou classes específicas para o preço de venda.
+            # Vamos buscar o preço que NÃO está dentro da tag de preço anterior.
+            preco_venda_container = item.select_one(".poly-price__current .andes-money-amount") or \
+                                   item.select_one(".ui-search-price__second-line .andes-money-amount") or \
+                                   item.select_one(".andes-money-amount:not(.andes-money-amount--previous)")
+
+            # Extração do valor real (Fração + Centavos)
+            fração = preco_venda_container.select_one(".andes-money-amount__fraction") if preco_venda_container else None
+            centavos = preco_venda_container.select_one(".andes-money-amount__cents") if preco_venda_container else None
             
             valor_final = fração.get_text(strip=True) if fração else "0"
             if centavos:
                 valor_final += f",{centavos.get_text(strip=True)}"
 
-            # Preço Antigo (se houver)
-            preco_antigo_tag = item.select_one(".andes-money-amount__price--previous .andes-money-amount__fraction")
+            # 2. Preço Antigo (especificamente da classe --previous)
+            preco_antigo_tag = item.select_one(".andes-money-amount--previous .andes-money-amount__fraction")
             preco_antigo = preco_antigo_tag.get_text(strip=True) if preco_antigo_tag else None
 
-            # Desconto (Ex: 49% OFF)
+            # 3. Desconto (Ex: 49% OFF)
             desconto_tag = item.select_one(".andes-money-amount__discount")
             porcentagem = desconto_tag.get_text(strip=True) if desconto_tag else None
 
             # --- TÍTULO E IMAGEM ---
-            titulo = item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True)
+            titulo_tag = item.select_one(".poly-component__title, .ui-search-item__title")
+            titulo = titulo_tag.get_text(strip=True) if titulo_tag else "Produto sem título"
+            
             img_tag = item.select_one("img")
             img_url = img_tag.get("data-src") or img_tag.get("src") if img_tag else None
             if img_url:
+                # Melhora a qualidade da imagem
                 img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
 
             # --- PROVA SOCIAL ---
@@ -54,6 +65,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             if "vendido" in texto_item:
                 if "+500" in texto_item: vendas = "📦 +500 vendidos"
                 elif "+10mil" in texto_item: vendas = "📦 +10mil vendidos"
+                elif "mil" in texto_item: vendas = "📦 +1.000 vendidos"
 
             resultados.append({
                 "id": prod_id,
