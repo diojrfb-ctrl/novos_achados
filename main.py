@@ -120,7 +120,7 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
             await asyncio.sleep(5)
 
         except Exception as e:
-            await enviar_log(f"⚠️ **ERRO AO POSTAR ITEM:**\nID: {p.get('id')}\nErro: {str(e)}")    """Processa a lista de produtos, gera relatório de log e posta se necessário."""
+            await enviar_log(f"⚠️ **ERRO AO POSTAR ITEM:**\nID: {p.get('id')}\nErro: {str(e)}")
     
     if not produtos:
         await enviar_log(f"❌ **{nome}**: Nenhum produto encontrado. Verifique os seletores.")
