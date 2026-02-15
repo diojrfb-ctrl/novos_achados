@@ -11,9 +11,9 @@ client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 def definir_tag(titulo: str) -> str:
     t = titulo.lower()
-    if any(x in t for x in ["piscina", "casa", "cozinha", "penteadeira"]): return "Casa"
-    if any(x in t for x in ["carro", "pneu", "moto"]): return "Veículos"
-    if any(x in t for x in ["tv", "led", "smart", "monitor"]): return "Eletrônicos"
+    if any(x in t for x in ["piscina", "casa", "cozinha", "cadeira"]): return "Casa"
+    if any(x in t for x in ["tv", "smart", "led", "monitor"]): return "Eletrônicos"
+    if any(x in t for x in ["gamer", "ps5", "nintendo", "xbox"]): return "Gamer"
     return "Ofertas"
 
 async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool = False):
@@ -22,7 +22,7 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
         try:
             tag = definir_tag(p['titulo'])
             
-            # Montagem do Texto conforme o exemplo solicitado
+            # Legenda conforme o padrão solicitado
             caption = f"🔥 **{p['titulo']}**\n"
             if p.get('avaliacao'): caption += f"{p['avaliacao']}\n"
             caption += f"{p['vendas']}\n\n"
@@ -37,7 +37,7 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
             caption += f"\n🔗 **Compre aqui:** {p['link']}\n\n"
             caption += f"➡️ Clique aqui para ver mais parecidos ➡️ #{tag}"
 
-            # Download da imagem para evitar "Webpage media empty"
+            # Envio da imagem baixada
             if p.get("imagem"):
                 r = requests.get(p["imagem"], timeout=10)
                 if r.status_code == 200:
@@ -48,20 +48,20 @@ async def processar_plataforma(nome: str, produtos: list[dict], modo_teste: bool
                     await client.send_message(MEU_CANAL, caption, parse_mode='md')
             
             if not modo_teste: marcar_enviado(p["id"])
-            await asyncio.sleep(15) # Intervalo de segurança
+            await asyncio.sleep(15) # Intervalo de postagem
 
         except Exception as e:
             print(f"Erro ao postar: {e}")
-
-async def executar_ciclo(modo_teste: bool = False):
-    await processar_plataforma("AMAZON", buscar_amazon(), modo_teste)
-    await processar_plataforma("MERCADO LIVRE", buscar_mercado_livre(), modo_teste)
 
 async def main():
     await client.start()
     while True:
         try:
-            await executar_ciclo(modo_teste=False)
+            produtos_ml = buscar_mercado_livre()
+            await processar_plataforma("MERCADO LIVRE", produtos_ml)
+            
+            produtos_amz = buscar_amazon()
+            await processar_plataforma("AMAZON", produtos_amz)
         except Exception as e:
             print(f"Erro no loop: {e}")
         await asyncio.sleep(3600)

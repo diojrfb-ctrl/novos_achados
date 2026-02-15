@@ -11,6 +11,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
         if response.status_code != 200: return []
 
         soup = BeautifulSoup(response.text, "html.parser")
+        # Seleciona os cards de produtos
         items = soup.select(".ui-search-layout__item") or soup.select(".poly-card")
 
         resultados = []
@@ -23,37 +24,41 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 10) -> list[dict]
             prod_id = extrair_mlb(link)
             if not prod_id: continue
 
-            # Título e Avaliação
-            titulo = item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True)
+            # --- CAPTURA DE PREÇO E DESCONTO (Conforme a DIV enviada) ---
+            # Preço atual (Fração + Centavos)
+            fração = item.select_one(".andes-money-amount__fraction")
+            centavos = item.select_one(".andes-money-amount__cents")
             
-            # --- LÓGICA DE PREÇO CORRIGIDA ---
-            # O ML coloca o preço atual (com desconto) na fração principal
-            preco_venda = item.select_one(".andes-money-amount__fraction").get_text(strip=True)
-            
-            # Busca o preço antigo (riscado) para confirmar se há promoção
+            valor_final = fração.get_text(strip=True) if fração else "0"
+            if centavos:
+                valor_final += f",{centavos.get_text(strip=True)}"
+
+            # Preço Antigo (se houver)
             preco_antigo_tag = item.select_one(".andes-money-amount__price--previous .andes-money-amount__fraction")
             preco_antigo = preco_antigo_tag.get_text(strip=True) if preco_antigo_tag else None
 
-            # Captura a porcentagem de desconto (ex: 35% OFF)
-            desconto_tag = item.select_one(".andes-money-amount__discount, .ui-search-price__discount")
+            # Desconto (Ex: 49% OFF)
+            desconto_tag = item.select_one(".andes-money-amount__discount")
             porcentagem = desconto_tag.get_text(strip=True) if desconto_tag else None
 
-            # Prova Social (Vendas e Estrelas)
-            texto_item = item.get_text(" ", strip=True).lower()
-            vendas = "📦 Novo"
-            if "+500" in texto_item: vendas = "📦 +500 vendidos"
-            elif "+10mil" in texto_item: vendas = "📦 +10mil vendidos"
-
-            # Imagem
+            # --- TÍTULO E IMAGEM ---
+            titulo = item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True)
             img_tag = item.select_one("img")
             img_url = img_tag.get("data-src") or img_tag.get("src") if img_tag else None
             if img_url:
                 img_url = img_url.replace("-I.jpg", "-O.jpg").replace("-V.jpg", "-O.jpg")
 
+            # --- PROVA SOCIAL ---
+            texto_item = item.get_text(" ", strip=True).lower()
+            vendas = "📦 Novo"
+            if "vendido" in texto_item:
+                if "+500" in texto_item: vendas = "📦 +500 vendidos"
+                elif "+10mil" in texto_item: vendas = "📦 +10mil vendidos"
+
             resultados.append({
                 "id": prod_id,
                 "titulo": titulo,
-                "preco": preco_venda,
+                "preco": valor_final,
                 "preco_antigo": preco_antigo,
                 "desconto": porcentagem,
                 "imagem": img_url,
