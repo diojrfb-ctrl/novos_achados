@@ -195,10 +195,31 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-if __name__ == "__main__":
-    # Roda o servidor web em background para o Render
+# --- WEB SERVER (HEALTH CHECK) ---
+
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "Bot de Ofertas Online", 200
+
+def run_flask():
+    # O Render exige que o bot escute na porta definida pela variável de ambiente PORT
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+async def start_everything():
+    # Inicia o servidor Flask em uma thread separada
     threading.Thread(target=run_flask, daemon=True).start()
     
-    # Inicia o loop do Telethon
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(loop_principal())
+    # Inicia o loop principal do bot
+    await loop_principal()
+
+if __name__ == "__main__":
+    try:
+        # Em Python moderno (3.10+), usamos asyncio.run para gerenciar o ciclo de vida
+        asyncio.run(start_everything())
+    except (KeyboardInterrupt, SystemExit):
+        print("Bot desligado manualmente.")
+    except Exception as e:
+        print(f"Erro crítico ao iniciar: {e}")
