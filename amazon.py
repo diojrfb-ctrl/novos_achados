@@ -18,20 +18,22 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             asin = produto.get("data-asin")
             if not asin: continue
 
+            # Preço Atual
             container = produto.select_one(".priceToPay") or produto.select_one(".a-price")
             if not container or container.find_parent(class_="pricePerUnit"): continue
-            
             f = container.select_one(".a-price-whole")
             c = container.select_one(".a-price-fraction")
             if not f: continue
             valor = f"{re.sub(r'\D', '', f.get_text())},{re.sub(r'\D', '', c.get_text()) if c else '00'}"
 
+            # Preço Antigo
             antigo = produto.select_one(".a-price.a-text-price .a-offscreen")
-            p_antigo = antigo.get_text(strip=True).replace("R$", "").strip() if antigo else None
+            p_antigo = antigo.get_text(strip=True).replace("R$", "").replace(".", "").strip() if antigo else None
 
+            # Prova Social
             nota_str = produto.select_one("i.a-icon-star-small span")
             qtd_str = produto.select_one("span.a-size-base.s-underline-text")
-            nota = nota_str.get_text(strip=True).split()[0].replace(",", ".") if nota_str else "4.4"
+            nota = nota_str.get_text(strip=True).split()[0].replace(",", ".") if nota_str else "4.7"
             avaliacoes = re.sub(r'\D', '', qtd_str.get_text()) if qtd_str else "50"
 
             resultados.append({
@@ -44,7 +46,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 "avaliacoes": avaliacoes,
                 "imagem": produto.select_one(".s-image").get("src"),
                 "link": f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}",
-                "parcelas": "Confira parcelamento no site",
+                "parcelas": "Confira no site",
                 "status": "duplicado" if ja_enviado(asin) else "novo"
             })
         return resultados

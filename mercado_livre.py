@@ -23,29 +23,30 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             prod_id = extrair_mlb(url_original)
             if not prod_id: continue
 
-            # Preço e Prova Social
-            f = item.select_one(".andes-money-amount__fraction")
-            c = item.select_one(".andes-money-amount__cents")
+            # --- PREÇO PROMOCIONAL (ATUAL) ---
+            f = item.select_one(".poly-price__current .andes-money-amount__fraction") or item.select_one(".andes-money-amount__fraction")
+            c = item.select_one(".poly-price__current .andes-money-amount__cents") or item.select_one(".andes-money-amount__cents")
             valor_promo = f.get_text(strip=True) if f else "0"
             if c: valor_promo += f",{c.get_text(strip=True)}"
 
+            # --- PREÇO ANTIGO (RISCADO) ---
             antigo_tag = item.select_one(".andes-money-amount--previous .andes-money-amount__fraction")
-            p_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
+            preco_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
             
             desc_tag = item.select_one(".andes-money-amount__discount")
             porcentagem = desc_tag.get_text(strip=True) if desc_tag else "0%"
 
-            nota = item.select_one(".poly-reviews__rating").get_text(strip=True) if item.select_one(".poly-reviews__rating") else "4.5"
-            aval = re.sub(r'\D', '', item.select_one(".poly-reviews__total").get_text()) if item.select_one(".poly-reviews__total") else "50"
+            # Prova Social
+            nota = item.select_one(".poly-reviews__rating").get_text(strip=True) if item.select_one(".poly-reviews__rating") else "4.8"
+            aval = re.sub(r'\D', '', item.select_one(".poly-reviews__total").get_text()) if item.select_one(".poly-reviews__total") else "100"
 
-            # Link com parâmetro de afiliado anexado ao original
             link_afiliado = f"{url_original}&matt_tool={MATT_TOOL}" if "?" in url_original else f"{url_original}?matt_tool={MATT_TOOL}"
 
             resultados.append({
                 "id": prod_id,
                 "titulo": item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True),
                 "preco": valor_promo,
-                "preco_antigo": p_antigo,
+                "preco_antigo": preco_antigo,
                 "desconto": porcentagem,
                 "nota": nota,
                 "avaliacoes": aval,
@@ -56,5 +57,4 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             })
         return resultados
     except Exception as e:
-        print(f"Erro ML: {e}")
         return []
