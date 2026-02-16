@@ -23,32 +23,36 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             prod_id = extrair_mlb(url_bruta)
             if not prod_id: continue
 
-            # Preço e Desconto
-            fração = item.select_one(".andes-money-amount__fraction")
-            valor_final = fração.get_text(strip=True) if fração else "0"
+            # --- CAPTURA DO PREÇO PROMOCIONAL ---
+            # O ML coloca o preço atual (promocional) na classe principal
+            container_preco = item.select_one(".poly-price__current") or item
+            fração = container_preco.select_one(".andes-money-amount__fraction")
+            centavos = container_preco.select_one(".andes-money-amount__cents")
             
+            valor_promo = fração.get_text(strip=True) if fração else "0"
+            if centavos: valor_promo += f",{centavos.get_text(strip=True)}"
+
+            # Preço Antigo (Para cálculo de economia)
             antigo_tag = item.select_one(".andes-money-amount--previous .andes-money-amount__fraction")
-            preco_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
+            p_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
             
             desc_tag = item.select_one(".andes-money-amount__discount")
             porcentagem = desc_tag.get_text(strip=True) if desc_tag else "0%"
 
             # Prova Social
-            nota_tag = item.select_one(".poly-reviews__rating")
-            qtd_tag = item.select_one(".poly-reviews__total")
-            nota = nota_tag.get_text(strip=True) if nota_tag else "4.0"
-            avaliacoes = re.sub(r'\D', '', qtd_tag.get_text()) if qtd_tag else "0"
+            nota = item.select_one(".poly-reviews__rating").get_text(strip=True) if item.select_one(".poly-reviews__rating") else "4.5"
+            aval = re.sub(r'\D', '', item.select_one(".poly-reviews__total").get_text()) if item.select_one(".poly-reviews__total") else "50"
 
             resultados.append({
                 "id": prod_id,
                 "titulo": item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True),
-                "preco": valor_final,
-                "preco_antigo": preco_antigo,
+                "preco": valor_promo, # Este é o preço com desconto
+                "preco_antigo": p_antigo,
                 "desconto": porcentagem,
                 "nota": nota,
-                "avaliacoes": avaliacoes,
+                "avaliacoes": aval,
                 "imagem": item.select_one("img").get("src") if item.select_one("img") else None,
-                "link": limpar_link_ml(url_bruta, MATT_TOOL), # Link Limpo aqui
+                "link": limpar_link_ml(url_bruta, MATT_TOOL),
                 "parcelas": item.select_one(".poly-component__installments").get_text(strip=True) if item.select_one(".poly-component__installments") else "Confira no site",
                 "status": "duplicado" if ja_enviado(prod_id) else "novo"
             })
