@@ -19,11 +19,13 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             if not link_tag: continue
             
             url_original = link_tag["href"]
-            link_final = limpar_para_link_normal(url_original, MATT_TOOL)
             prod_id = extrair_mlb(url_original)
-            
             id_referencia = prod_id if prod_id else url_original
+            
             if ja_enviado(id_referencia): continue
+
+            # O link é mantido íntegro com a função que você forneceu em utils.py
+            link_final = limpar_para_link_normal(url_original, MATT_TOOL)
 
             # Preço Atual
             f = item.select_one(".poly-price__current .andes-money-amount__fraction")
@@ -35,13 +37,15 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             antigo_tag = item.select_one(".andes-money-amount--previous .andes-money-amount__fraction")
             p_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
             
-            # Parcelamento (Tenta capturar o valor da parcela)
+            # Parcelamento (Ex: em 10x R$ 209,90 sem juros)
             parcela_tag = item.select_one(".poly-price__installments")
-            parcela_texto = parcela_tag.get_text(strip=True) if parcela_tag else "Confira no site"
+            parcela_texto = parcela_tag.get_text(strip=True) if parcela_tag else ""
 
-            # Estoque / Quantidade (Geralmente aparece em ofertas relâmpago ou "Últimas unidades")
+            # Estoque
             estoque_tag = item.select_one(".poly-component__promotional-info")
-            estoque = "Poucas unidades!" if estoque_tag and "restam" in estoque_tag.get_text().lower() else "Disponível"
+            estoque = "Disponível"
+            if estoque_tag and "restam" in estoque_tag.get_text().lower():
+                estoque = estoque_tag.get_text(strip=True)
 
             # Frete
             frete_tag = item.select_one(".poly-component__shipping")
@@ -57,8 +61,10 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
                 "estoque": estoque,
                 "link": link_final,
                 "imagem": item.select_one("img").get("src"),
-                "nota": item.select_one(".poly-reviews__rating").get_text(strip=True) if item.select_one(".poly-reviews__rating") else "4.8",
+                "nota": item.select_one(".poly-reviews__rating").get_text(strip=True) if item.select_one(".poly-reviews__rating") else "4.9",
                 "avaliacoes": re.sub(r'\D', '', item.select_one(".poly-reviews__total").get_text()) if item.select_one(".poly-reviews__total") else "100"
             })
         return resultados
-    except: return []
+    except Exception as e:
+        print(f"Erro ao buscar no ML: {e}")
+        return []
