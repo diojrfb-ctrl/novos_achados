@@ -3,186 +3,113 @@ import io
 import requests
 import os
 import threading
-import re
 from flask import Flask
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # Módulos locais
 from config import API_ID, API_HASH, STRING_SESSION, MEU_CANAL, CANAL_TESTE
+from redis_client import marcar_enviado, ja_enviado
 from mercado_livre import buscar_mercado_livre
 from amazon import buscar_amazon
-from redis_client import marcar_enviado, ja_enviado
+from formatters import formatar_copy_otimizada
 
-# ==============================
-# CONFIGURAÇÃO DO CLIENTE
-# ==============================
+# Configuração do Cliente
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-# Dicionário para gerenciar os scrapers disponíveis
+# REGISTRO DE COMPONENTES (Adicione novos aqui)
 COMPONENTES = {
-    "ml": buscar_mercado_livre,
-    "amazon": buscar_amazon,
+    "ml": {"busca": buscar_mercado_livre, "simplificado": False},
+    "amazon": {"busca": buscar_amazon, "simplificado": True},
 }
 
-# ==============================
-# CATEGORIZAÇÃO AUTOMÁTICA
-# ==============================
-def extrair_categoria_hashtag(titulo: str) -> str:
-    titulo_low = titulo.lower()
-
-    categorias = {
-        "Cozinha": ["panela", "fritadeira", "airfryer", "prato", "copo", "talher", "cozinha"],
-        "Games": ["ps5", "xbox", "nintendo", "jogo", "gamer", "console"],
-        "Eletronicos": ["smartphone", "celular", "iphone", "televisao", "tv", "monitor", "fone"],
-        "Suplementos": ["whey", "creatina", "suplemento", "vitamin", "albumina", "protein"],
-        "Informatica": ["notebook", "laptop", "teclado", "mouse", "ssd", "memoria"],
-        "Casa": ["toalha", "lençol", "aspirador", "iluminação", "móvel", "sofa"]
-    }
-
-    for cat, keywords in categorias.items():
-        if any(kw in titulo_low for kw in keywords):
-            return f" #{cat}"
-
-    return ""
-
-# ==============================
-# FORMATAÇÃO DA COPY
-# ==============================
-def formatar_copy_otimizada(p: dict, simplificado: bool = False) -> str:
+# Função auxiliar de envio para evitar repetição de código
+async def enviar_para_telegram(p: dict, destino: str, simplificado: bool):
     try:
-        hashtag_cat = extrair_categoria_hashtag(p['titulo'])
-        
-        # Início da Copy
-        copy = f"**{p['titulo']}**\n"
-        copy += f"⭐ {p['nota']} ({p['avaliacoes']} opiniões)\n"
-
-        if simplificado:
-            # Layout simplificado para Amazon conforme solicitado
-            copy += f"✅ **Por apenas R$ {p['preco']}**\n"
+        caption = formatar_copy_otimizada(p, simplificado=simplificado)
+        if p.get("imagem"):
+            r = requests.get(p["imagem"], timeout=15)
+            r.raise_for_status()
+            foto = io.BytesIO(r.content)
+            foto.name = 'post.jpg'
+            await client.send_file(destino, foto, caption=caption)
         else:
-            # Layout completo (Mercado Livre e outros)
-            preco_limpo = re.sub(r'[^\d,]', '', p['preco']).replace(',', '.')
-            atual_num = float(preco_limpo)
-
-            if p.get('preco_antigo'):
-                antigo_limpo = re.sub(r'[^\d,]', '', p['preco_antigo']).replace(',', '.')
-                antigo_num = float(antigo_limpo)
-                
-                if antigo_num > atual_num:
-                    porcentagem = int((1 - (atual_num / antigo_num)) * 100)
-                    copy += f"💰 De: R$ {p['preco_antigo']}\n"
-                    copy += f"📉 ({porcentagem}% de desconto)\n"
-
-            copy += f"✅ **POR: R$ {p['preco']}**\n"
-
-        # Informações complementares comuns
-        linha_cartao = f"💳 ou {p['parcelas'].replace('ou', '').strip()}\n" if p.get('parcelas') else ""
-        copy += linha_cartao
-        copy += f"📦 Frete: {p['frete']}\n"
-        copy += f"🔥 Estoque: {p['estoque']}\n\n"
-        copy += f"🔗 **LINK DA OFERTA:**\n"
-        copy += f"{p['link']}\n\n"
-        copy += f"➡️ #Ofertas{hashtag_cat}"
-
-        return copy
-
+            await client.send_message(destino, caption)
+        return True
     except Exception as e:
-        print(f"Erro na formatação: {e}")
-        return f"**{p['titulo']}**\n\n✅ POR: R$ {p['preco']}\n\n🔗 {p['link']}"
+        print(f"Erro no envio: {e}")
+        return False
 
 # ==============================
-# COMANDO DE TESTE (/testar)
+# COMANDO DE TESTE (/testar site)
 # ==============================
 @client.on(events.NewMessage(pattern=r'/testar(?:\s+(\w+))?'))
 async def handler_teste(event):
     args = event.pattern_match.group(1)
+    opcoes_lista = list(COMPONENTES.keys())
     
     if not args or args.lower() not in COMPONENTES:
-        opcoes = "/".join(COMPONENTES.keys())
-        await event.reply(f"❌ Use: `/testar {opcoes}`")
+        await event.reply(f"❌ Site não encontrado. Use: `/testar {' ou '.join(opcoes_lista)}`.")
         return
 
     site_key = args.lower()
-    await event.reply(f"🔍 Testando componente: **{site_key.upper()}**...")
+    await event.reply(f"🔍 Buscando 1 item de teste em: **{site_key.upper()}**...")
 
     try:
-        busca_func = COMPONENTES[site_key]
+        # Busca sem limite e sem checar Redis para o teste
+        busca_func = COMPONENTES[site_key]["busca"]
         produtos = busca_func(limite=1)
 
         if not produtos:
-            await event.reply(f"⚠️ Nenhum produto encontrado em `{site_key}`.")
+            await event.reply("⚠️ Nenhum produto retornado pelo componente.")
             return
 
         p = produtos[0]
-        # Aplica simplificação se for Amazon
-        is_amazon = (site_key == "amazon")
-        caption = f"🧪 **MODO TESTE: {site_key.upper()}**\n\n" + formatar_copy_otimizada(p, simplificado=is_amazon)
-
-        if p.get("imagem"):
-            r = requests.get(p["imagem"], timeout=15)
-            foto = io.BytesIO(r.content)
-            foto.name = 'teste.jpg'
-            await client.send_file(CANAL_TESTE, foto, caption=caption)
-        else:
-            await client.send_message(CANAL_TESTE, caption)
-
-        await event.reply(f"✅ Enviado para {CANAL_TESTE}")
+        p['titulo'] = f"🧪 [TESTE] {p['titulo']}"
+        
+        is_simplificado = COMPONENTES[site_key]["simplificado"]
+        await enviar_para_telegram(p, CANAL_TESTE, is_simplificado)
+        await event.reply(f"✅ Enviado para o canal de testes!")
 
     except Exception as e:
-        await event.reply(f"💥 Erro: {str(e)}")
+        await event.reply(f"💥 Erro no componente {site_key}: {str(e)}")
 
 # ==============================
-# LOOP AUTOMÁTICO PRINCIPAL
+# LOOP AUTOMÁTICO
 # ==============================
 async def loop_bot():
     await client.start()
-    print("🚀 Bot Online!")
+    print("🚀 Bot de Ofertas Online!")
 
     while True:
-        for nome_site, busca_func in COMPONENTES.items():
+        for nome_site, config in COMPONENTES.items():
             try:
-                produtos = busca_func()
-                is_amazon = (nome_site == "amazon")
+                print(f"🔄 Varrendo: {nome_site}")
+                produtos = config["busca"]()
 
                 for p in produtos:
                     if ja_enviado(p["id"]):
                         continue
 
-                    try:
-                        caption = formatar_copy_otimizada(p, simplificado=is_amazon)
-
-                        if p.get("imagem"):
-                            try:
-                                r = requests.get(p["imagem"], timeout=15)
-                                r.raise_for_status()
-                                foto = io.BytesIO(r.content)
-                                foto.name = 'post.jpg'
-                                await client.send_file(MEU_CANAL, foto, caption=caption)
-                            except:
-                                await client.send_message(MEU_CANAL, caption)
-                        else:
-                            await client.send_message(MEU_CANAL, caption)
-
+                    sucesso = await enviar_para_telegram(p, MEU_CANAL, config["simplificado"])
+                    
+                    if sucesso:
                         marcar_enviado(p["id"])
-                        await asyncio.sleep(30) 
+                        await asyncio.sleep(30) # Delay entre mensagens
 
-                    except Exception as e:
-                        continue
+            except Exception as e:
+                print(f"Erro no ciclo {nome_site}: {e}")
 
-            except Exception as loop_error:
-                print(f"Erro em {nome_site}: {loop_error}")
-
+        print("⏳ Ciclo finalizado. Aguardando 1 hora...")
         await asyncio.sleep(3600)
 
 # ==============================
-# SERVIDOR E EXECUÇÃO
+# SERVIDOR FLASK E EXECUÇÃO
 # ==============================
 app = Flask(__name__)
 
 @app.route('/')
-def health():
-    return "OK", 200
+def health(): return "Bot Running", 200
 
 async def main():
     port = int(os.environ.get("PORT", 10000))
