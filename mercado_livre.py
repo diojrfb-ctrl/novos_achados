@@ -17,8 +17,8 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             link_tag = item.select_one("a")
             if not link_tag: continue
             
-            # Limpeza imediata do link
-            link_curto = limpar_link_ml(link_tag["href"], MATT_TOOL)
+            # Link Real Limpo (Garante que não dê 404)
+            link_final = limpar_link_ml(link_tag["href"], MATT_TOOL)
             prod_id = extrair_mlb(link_tag["href"])
 
             # Preços
@@ -30,14 +30,13 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             antigo_tag = item.select_one(".andes-money-amount--previous .andes-money-amount__fraction")
             p_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
             
-            # Dados de Curadoria
             resultados.append({
                 "id": prod_id,
                 "titulo": item.select_one(".poly-component__title, .ui-search-item__title").get_text(strip=True),
                 "preco": valor_promo,
                 "preco_antigo": p_antigo,
                 "loja": item.select_one(".poly-component__seller").get_text(strip=True) if item.select_one(".poly-component__seller") else "Mercado Livre",
-                "link": link_curto,
+                "link": link_final,
                 "imagem": item.select_one("img").get("src") if item.select_one("img") else None,
                 "nota": item.select_one(".poly-reviews__rating").get_text(strip=True) if item.select_one(".poly-reviews__rating") else "4.8",
                 "avaliacoes": re.sub(r'\D', '', item.select_one(".poly-reviews__total").get_text()) if item.select_one(".poly-reviews__total") else "100"

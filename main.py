@@ -8,31 +8,33 @@ from mercado_livre import buscar_mercado_livre
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 def formatar_copy(p: dict) -> str:
-    # Cálculos de Economia
+    # Lógica de Preço
     try:
-        atual_num = float(p['preco'].replace('.', '').replace(',', '.'))
+        atual_val = p['preco'].replace('.', '').replace(',', '.')
+        atual_num = float(atual_val)
         if p['preco_antigo']:
-            antigo_num = float(p['preco_antigo'].replace('.', '').replace(',', '.'))
+            antigo_val = p['preco_antigo'].replace('.', '').replace(',', '.')
+            antigo_num = float(antigo_val)
             economia = antigo_num - atual_num
             porcentagem = int((1 - (atual_num / antigo_num)) * 100)
             
-            linha_preco = f"💰 ~~R$ {p['preco_antigo']}~~\n"
-            linha_preco += f"✅ **POR APENAS: R$ {p['preco']}**\n"
-            linha_preco += f"📉 **VOCÊ ECONOMIZA: R$ {economia:.2f} ({porcentagem}% OFF)**"
+            bloco_preco = f"💰 R$ {p['preco_antigo']}\n"
+            bloco_preco += f"✅ **POR APENAS: R$ {p['preco']}**\n"
+            bloco_preco += f"📉 **VOCÊ ECONOMIZA: R$ {economia:.2f} ({porcentagem}% OFF)**"
         else:
-            linha_preco = f"✅ **POR APENAS: R$ {p['preco']}**"
+            bloco_preco = f"✅ **POR APENAS: R$ {p['preco']}**"
     except:
-        linha_preco = f"✅ **POR APENAS: R$ {p['preco']}**"
+        bloco_preco = f"✅ **POR APENAS: R$ {p['preco']}**"
 
-    # Construção do Post (Foco em Escaneabilidade)
+    # Construção da Curadoria
     copy = f"**{p['titulo']}**\n"
     copy += f"⭐ {p['nota']} ({p['avaliacoes']}+ avaliações)\n\n"
-    copy += f"{linha_preco}\n\n"
+    copy += f"{bloco_preco}\n\n"
     copy += f"🏪 Vendido por: {p['loja']}\n"
     copy += f"🚀 Envio rápido garantido\n"
     copy += f"⚠️ Estoque limitado, pode subir a qualquer momento!\n\n"
     copy += f"🔗 **APROVEITAR OFERTA:**\n"
-    copy += f"{p['link']}\n\n" # Link exposto e reduzido
+    copy += f"{p['link']}\n\n"
     copy += f"➡️ #Ofertas #MercadoLivre"
     
     return copy
@@ -48,14 +50,13 @@ async def processar():
                 foto = io.BytesIO(r.content)
                 foto.name = 'produto.jpg'
                 await client.send_file(MEU_CANAL, foto, caption=caption, parse_mode='md')
-                await asyncio.sleep(20) # Intervalo de segurança
+                await asyncio.sleep(20)
         except Exception as e:
             print(f"Erro: {e}")
 
-# Servidor para o Render
 app = Flask(__name__)
 @app.route('/')
-def h(): return "Bot Online", 200
+def h(): return "OK", 200
 
 async def main():
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
