@@ -1,17 +1,24 @@
 import re
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 def extrair_mlb(url: str) -> str | None:
-    # Captura o padrão MLB seguido de números
     match = re.search(r"MLB-?(\d+)", url)
-    if match:
-        return f"MLB{match.group(1)}"
-    return None
+    return f"MLB{match.group(1)}" if match else None
 
-def gerar_link_real(url_bruta: str, matt_tool: str) -> str:
-    """Ignora links de cliques e gera um link direto funcional."""
-    mlb_id = extrair_mlb(url_bruta)
-    if mlb_id:
-        # Este formato é o 'link universal' do ML que nunca quebra
-        # Ele redireciona automaticamente para a página correta do produto
-        return f"https://www.mercadolivre.com.br/p/{mlb_id}?matt_tool={matt_tool}"
-    return url_bruta
+def limpar_para_link_normal(url: str, matt_tool: str) -> str:
+    """Mantém a URL original (com nome do produto) e anexa o matt_tool"""
+    # Se for link de clique (patrocinado), ele geralmente não tem o slug.
+    # Mas para links normais de busca, isso aqui limpa o excesso:
+    parsed = urlparse(url)
+    # Mantém apenas o seu parâmetro de afiliado
+    nova_query = urlencode({'matt_tool': matt_tool})
+    
+    # Reconstrói mantendo o path original (ex: /nome-produto-venda-MLB123)
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        nova_query,
+        ''
+    ))
