@@ -1,7 +1,7 @@
 from curl_cffi import requests
 from bs4 import BeautifulSoup
-from config import HEADERS
-from utils import extrair_mlb
+from config import HEADERS, MATT_TOOL
+from utils import extrair_mlb, limpar_para_link_normal
 from redis_client import ja_enviado
 import re
 
@@ -36,19 +36,15 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             if "click1.mercadolivre.com.br" in url_original:
                 continue
 
-            # Extrai ID MLB
             prod_id = extrair_mlb(url_original)
-            if not prod_id:
-                continue
-
-            id_referencia = prod_id
+            id_referencia = prod_id if prod_id else url_original
 
             # ❌ Evita repetidos
             if ja_enviado(id_referencia):
                 continue
 
-            # 🔗 Força link limpo padrão
-            link_final = f"https://www.mercadolivre.com.br/p/{prod_id}"
+            # 🔗 Mantém link completo original (mas limpo se necessário)
+            link_final = limpar_para_link_normal(url_original, MATT_TOOL)
 
             # =========================
             # TÍTULO
@@ -99,7 +95,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
                     estoque = texto_estoque
 
             # =========================
-            # FRETE (PADRONIZADO)
+            # FRETE PADRONIZADO
             # =========================
             frete_info = "Consulte o frete"
 
