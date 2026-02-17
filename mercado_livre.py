@@ -1,7 +1,7 @@
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 from config import HEADERS, MATT_TOOL
-from utils import extrair_mlb, limpar_link_ml
+from utils import extrair_mlb, limpar_link_ml_completo
 import re
 
 def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]:
@@ -17,9 +17,10 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             link_tag = item.select_one("a")
             if not link_tag: continue
             
-            # Link Real Limpo (Garante que não dê 404)
-            link_final = limpar_link_ml(link_tag["href"], MATT_TOOL)
-            prod_id = extrair_mlb(link_tag["href"])
+            # Captura a URL original e limpa apenas os parâmetros
+            link_original = link_tag["href"]
+            link_final = limpar_link_ml_completo(link_original, MATT_TOOL)
+            prod_id = extrair_mlb(link_original)
 
             # Preços
             f = item.select_one(".poly-price__current .andes-money-amount__fraction")
@@ -42,4 +43,6 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
                 "avaliacoes": re.sub(r'\D', '', item.select_one(".poly-reviews__total").get_text()) if item.select_one(".poly-reviews__total") else "100"
             })
         return resultados
-    except: return []
+    except Exception as e:
+        print(f"Erro no Scraper: {e}")
+        return []

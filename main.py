@@ -7,14 +7,12 @@ from mercado_livre import buscar_mercado_livre
 
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-def formatar_copy(p: dict) -> str:
-    # Lógica de Preço
+def formatar_copy_especialista(p: dict) -> str:
+    # Lógica de Preço e Economia
     try:
-        atual_val = p['preco'].replace('.', '').replace(',', '.')
-        atual_num = float(atual_val)
+        atual_num = float(p['preco'].replace('.', '').replace(',', '.'))
         if p['preco_antigo']:
-            antigo_val = p['preco_antigo'].replace('.', '').replace(',', '.')
-            antigo_num = float(antigo_val)
+            antigo_num = float(p['preco_antigo'].replace('.', '').replace(',', '.'))
             economia = antigo_num - atual_num
             porcentagem = int((1 - (atual_num / antigo_num)) * 100)
             
@@ -26,7 +24,7 @@ def formatar_copy(p: dict) -> str:
     except:
         bloco_preco = f"✅ **POR APENAS: R$ {p['preco']}**"
 
-    # Construção da Curadoria
+    # Post Formatado (Markdown)
     copy = f"**{p['titulo']}**\n"
     copy += f"⭐ {p['nota']} ({p['avaliacoes']}+ avaliações)\n\n"
     copy += f"{bloco_preco}\n\n"
@@ -39,28 +37,31 @@ def formatar_copy(p: dict) -> str:
     
     return copy
 
-async def processar():
+async def processar_loop():
     await client.start()
-    produtos = buscar_mercado_livre()
-    for p in produtos:
-        try:
-            caption = formatar_copy(p)
-            if p["imagem"]:
-                r = requests.get(p["imagem"], timeout=10)
-                foto = io.BytesIO(r.content)
-                foto.name = 'produto.jpg'
-                await client.send_file(MEU_CANAL, foto, caption=caption, parse_mode='md')
-                await asyncio.sleep(20)
-        except Exception as e:
-            print(f"Erro: {e}")
+    while True:
+        produtos = buscar_mercado_livre()
+        for p in produtos:
+            try:
+                caption = formatar_copy_especialista(p)
+                if p["imagem"]:
+                    r = requests.get(p["imagem"], timeout=15)
+                    foto = io.BytesIO(r.content)
+                    foto.name = 'produto.jpg'
+                    await client.send_file(MEU_CANAL, foto, caption=caption, parse_mode='md')
+                    await asyncio.sleep(20) # Cooldown contra flood
+            except Exception as e:
+                print(f"Erro ao postar: {e}")
+        await asyncio.sleep(3600) # Busca a cada 1 hora
 
 app = Flask(__name__)
 @app.route('/')
-def h(): return "OK", 200
+def health(): return "Bot Ativo", 200
 
-async def main():
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
-    await processar()
+async def start():
+    port = int(os.environ.get("PORT", 10000))
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port), daemon=True).start()
+    await processar_loop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(start())
