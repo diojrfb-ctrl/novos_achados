@@ -1,13 +1,17 @@
 import re
 
 def extrair_mlb(url: str) -> str | None:
+    # Captura o padrão MLB seguido de números
     match = re.search(r"MLB-?(\d+)", url)
-    return f"MLB{match.group(1)}" if match else None
+    if match:
+        return f"MLB{match.group(1)}"
+    return None
 
-def validar_desconto_real(preco_atual: float, preco_antigo: float) -> bool:
-    """Retorna False se o desconto for absurdamente alto (>50%), indicando erro."""
-    if not preco_antigo or preco_antigo <= 0:
-        return True
-    desconto = (1 - (preco_atual / preco_antigo)) * 100
-    # Descontos acima de 50% geralmente são erro de variação ou bug de scraping
-    return desconto < 50
+def limpar_link_ml(url: str, matt_tool: str) -> str:
+    """Gera o link mais curto possível que funciona para QUALQUER anúncio"""
+    mlb_id = extrair_mlb(url)
+    if mlb_id:
+        # Formato: mercadolivre.com.br/MLB12345?matt_tool=...
+        # Este formato funciona para catálogo e para vendedores comuns
+        return f"https://www.mercadolivre.com.br/{mlb_id}?matt_tool={matt_tool}"
+    return url
