@@ -24,7 +24,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             
             if ja_enviado(id_referencia): continue
 
-            # O link é mantido íntegro com a função que você forneceu em utils.py
+            # Gera o link mantendo a estrutura original para não quebrar redirecionamentos
             link_final = limpar_para_link_normal(url_original, MATT_TOOL)
 
             # Preço Atual
@@ -37,7 +37,7 @@ def buscar_mercado_livre(termo: str = "ofertas", limite: int = 15) -> list[dict]
             antigo_tag = item.select_one(".andes-money-amount--previous .andes-money-amount__fraction")
             p_antigo = antigo_tag.get_text(strip=True) if antigo_tag else None
             
-            # Parcelamento (Ex: em 10x R$ 209,90 sem juros)
+            # Parcelamento
             parcela_tag = item.select_one(".poly-price__installments")
             parcela_texto = parcela_tag.get_text(strip=True) if parcela_tag else ""
 
