@@ -8,20 +8,19 @@ from redis_client import ja_enviado
 
 def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
     """
-    Busca produtos na Amazon Brasil e retorna uma lista de dicionários formatados.
-    Ajustado para capturar o título completo do produto e não apenas a marca.
+    Busca produtos na Amazon Brasil com seletores otimizados para título e avaliações.
     """
     url = f"https://www.amazon.com.br/s?k={termo}"
 
     try:
-        # Delay randômico para evitar detecção de bot
-        time.sleep(random.uniform(1.2, 2.5))
+        # Delay para evitar bloqueios
+        time.sleep(random.uniform(1.5, 3.0))
 
         response = requests.get(
             url,
             headers=HEADERS,
             impersonate="chrome124",
-            timeout=20
+            timeout=25
         )
 
         if response.status_code != 200:
@@ -29,7 +28,6 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        # Seleciona os containers de produtos
         produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
 
         resultados = []
@@ -42,19 +40,26 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             if not asin:
                 continue
 
-            # ❌ Ignora se já enviado (pode ser removido se o controle for feito apenas no main)
+            # Verificação de duplicados (Redis)
             if ja_enviado(asin):
                 continue
 
             # =========================
+            # TÍTULO (Otimizado para produto, não marca)
+            # =========================
+            titulo_tag = (
+                produto.select_one("h2 a span") or 
+                produto.select_one(".a-size-base-plus.a-color-base.a-text-normal") or
+                produto.select_one("h2 span")
+            )
+            if not titulo_tag:
+                continue
+            titulo = titulo_tag.get_text(" ", strip=True)
+
+            # =========================
             # PREÇO ATUAL
             # =========================
-            container = (
-                produto.select_one(".priceToPay")
-                or produto.select_one(".a-price")
-            )
-
-            # Ignora se for preço por unidade (ex: R$ 0,10/unidade)
+            container = produto.select_one(".priceToPay") or produto.select_one(".a-price")
             if not container or container.find_parent(class_="pricePerUnit"):
                 continue
 
@@ -65,76 +70,51 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 continue
 
             valor_inteiro = re.sub(r"\D", "", whole.get_text())
-            valor_centavos = (
-                re.sub(r"\D", "", fraction.get_text())
-                if fraction else "00"
-            )
-
-            if not valor_inteiro:
-                continue
-
+            valor_centavos = re.sub(r"\D", "", fraction.get_text()) if fraction else "00"
             valor = f"{valor_inteiro},{valor_centavos}"
 
             # =========================
-            # PREÇO ANTIGO (Mantido para o dicionário, o main decide se exibe)
+            # PREÇO ANTIGO
             # =========================
             antigo = produto.select_one(".a-price.a-text-price .a-offscreen")
             p_antigo = None
-
             if antigo:
-                antigo_texto = antigo.get_text(" ", strip=True)
-                # Limpa para formato numérico caso precise de cálculo
-                p_antigo = (
-                    antigo_texto
-                    .replace("R$", "")
-                    .replace(".", "")
-                    .strip()
-                )
+                p_antigo = antigo.get_text(" ", strip=True).replace("R$", "").replace(".", "").strip()
 
             # =========================
-            # TÍTULO (CORRIGIDO)
+            # AVALIAÇÃO E NOTA (Seletor Dinâmico)
             # =========================
-            # Busca especificamente dentro do H2, que contém o nome completo do produto
-            titulo_tag = (
-                produto.select_one("h2 a span") 
-                or produto.select_one(".a-size-base-plus.a-color-base.a-text-normal")
+            # Nota (ex: 4.5)
+            nota_tag = (
+                produto.select_one("i.a-icon-star-small span") or 
+                produto.select_one("#acrPopover") or
+                produto.select_one(".a-icon-star")
             )
             
-            if not titulo_tag:
-                continue
+            if nota_tag:
+                nota_texto = nota_tag.get_text(" ", strip=True).replace(",", ".")
+                match_nota = re.search(r"(\d+\.\d+|\d+)", nota_texto)
+                nota = match_nota.group(1) if match_nota else "4.7"
+            else:
+                nota = "4.7"
 
-            titulo = titulo_tag.get_text(" ", strip=True)
-
-            # =========================
-            # AVALIAÇÃO
-            # =========================
-            nota_tag = produto.select_one("i.a-icon-star-small span")
-            qtd_tag = produto.select_one("span.a-size-base.s-underline-text")
-
-            nota = (
-                nota_tag.get_text(" ", strip=True)
-                .split()[0]
-                .replace(",", ".")
-                if nota_tag else "4.7"
+            # Quantidade (ex: 1675)
+            qtd_tag = (
+                produto.select_one("span.a-size-base.s-underline-text") or 
+                produto.select_one("#acrCustomerReviewText")
             )
-
-            avaliacoes = (
-                re.sub(r"\D", "", qtd_tag.get_text())
-                if qtd_tag else "50"
-            )
+            avaliacoes = re.sub(r"\D", "", qtd_tag.get_text()) if qtd_tag else "50"
 
             # =========================
-            # IMAGEM
+            # IMAGEM E LINK
             # =========================
             img_tag = produto.select_one(".s-image")
             imagem = img_tag.get("src") if img_tag else None
-
-            # =========================
-            # LINK AFILIADO
-            # =========================
             link = f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}"
 
-            # Append dos dados normalizados
+            # =========================
+            # RESULTADO FINAL
+            # =========================
             resultados.append({
                 "id": asin,
                 "titulo": titulo,
@@ -152,5 +132,5 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
         return resultados
 
     except Exception as e:
-        print(f"Erro ao buscar Amazon: {e}")
+        print(f"Erro crítico Amazon: {e}")
         return []
