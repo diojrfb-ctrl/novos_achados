@@ -14,17 +14,20 @@ from mercado_livre import buscar_mercado_livre
 from amazon import buscar_amazon
 from formatters import formatar_copy_otimizada
 
-# Configuração do Cliente
+# Inicialização do Cliente
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-# REGISTRO DE COMPONENTES (Adicione novos aqui)
+# ==============================
+# REGISTRO DE COMPONENTES
+# ==============================
+# Sempre que criar um site novo, basta adicionar aqui.
 COMPONENTES = {
     "ml": {"busca": buscar_mercado_livre, "simplificado": False},
     "amazon": {"busca": buscar_amazon, "simplificado": True},
 }
 
-# Função auxiliar de envio para evitar repetição de código
 async def enviar_para_telegram(p: dict, destino: str, simplificado: bool):
+    """Gerencia o download da imagem e envio do post."""
     try:
         caption = formatar_copy_otimizada(p, simplificado=simplificado)
         if p.get("imagem"):
@@ -37,7 +40,7 @@ async def enviar_para_telegram(p: dict, destino: str, simplificado: bool):
             await client.send_message(destino, caption)
         return True
     except Exception as e:
-        print(f"Erro no envio: {e}")
+        print(f"Erro no envio para {destino}: {e}")
         return False
 
 # ==============================
@@ -46,45 +49,46 @@ async def enviar_para_telegram(p: dict, destino: str, simplificado: bool):
 @client.on(events.NewMessage(pattern=r'/testar(?:\s+(\w+))?'))
 async def handler_teste(event):
     args = event.pattern_match.group(1)
-    opcoes_lista = list(COMPONENTES.keys())
+    opcoes = list(COMPONENTES.keys())
     
     if not args or args.lower() not in COMPONENTES:
-        await event.reply(f"❌ Site não encontrado. Use: `/testar {' ou '.join(opcoes_lista)}`.")
+        await event.reply(f"❌ Site não encontrado. Use: `/testar {' ou '.join(opcoes)}`.")
         return
 
     site_key = args.lower()
-    await event.reply(f"🔍 Buscando 1 item de teste em: **{site_key.upper()}**...")
+    await event.reply(f"🔍 Testando **{site_key.upper()}** no canal de testes...")
 
     try:
-        # Busca sem limite e sem checar Redis para o teste
+        # Busca apenas 1 item para validação
         busca_func = COMPONENTES[site_key]["busca"]
         produtos = busca_func(limite=1)
 
         if not produtos:
-            await event.reply("⚠️ Nenhum produto retornado pelo componente.")
+            await event.reply(f"⚠️ O componente `{site_key}` não retornou nenhum item agora.")
             return
 
         p = produtos[0]
+        # Adiciona prefixo para saber que é teste
         p['titulo'] = f"🧪 [TESTE] {p['titulo']}"
         
         is_simplificado = COMPONENTES[site_key]["simplificado"]
         await enviar_para_telegram(p, CANAL_TESTE, is_simplificado)
-        await event.reply(f"✅ Enviado para o canal de testes!")
+        await event.reply(f"✅ Enviado para {CANAL_TESTE}!")
 
     except Exception as e:
-        await event.reply(f"💥 Erro no componente {site_key}: {str(e)}")
+        await event.reply(f"💥 Falha técnica no teste: {str(e)}")
 
 # ==============================
 # LOOP AUTOMÁTICO
 # ==============================
 async def loop_bot():
     await client.start()
-    print("🚀 Bot de Ofertas Online!")
+    print("🚀 Bot de Ofertas Online e escutando comandos!")
 
     while True:
         for nome_site, config in COMPONENTES.items():
+            print(f"🔄 Varrendo: {nome_site}")
             try:
-                print(f"🔄 Varrendo: {nome_site}")
                 produtos = config["busca"]()
 
                 for p in produtos:
@@ -95,7 +99,7 @@ async def loop_bot():
                     
                     if sucesso:
                         marcar_enviado(p["id"])
-                        await asyncio.sleep(30) # Delay entre mensagens
+                        await asyncio.sleep(30) # Delay para não ser banido pelo Telegram
 
             except Exception as e:
                 print(f"Erro no ciclo {nome_site}: {e}")
@@ -104,7 +108,7 @@ async def loop_bot():
         await asyncio.sleep(3600)
 
 # ==============================
-# SERVIDOR FLASK E EXECUÇÃO
+# SERVIDOR DE SAÚDE E EXECUÇÃO
 # ==============================
 app = Flask(__name__)
 
@@ -113,6 +117,7 @@ def health(): return "Bot Running", 200
 
 async def main():
     port = int(os.environ.get("PORT", 10000))
+    # Flask em thread separada para não travar o loop do bot
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port), daemon=True).start()
     await loop_bot()
 

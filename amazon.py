@@ -6,11 +6,15 @@ import re
 from config import HEADERS, AMAZON_TAG
 from redis_client import ja_enviado
 
-
 def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
+    """
+    Busca produtos na Amazon Brasil e retorna uma lista de dicionários formatados.
+    Ajustado para capturar o título completo do produto e não apenas a marca.
+    """
     url = f"https://www.amazon.com.br/s?k={termo}"
 
     try:
+        # Delay randômico para evitar detecção de bot
         time.sleep(random.uniform(1.2, 2.5))
 
         response = requests.get(
@@ -20,7 +24,12 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             timeout=20
         )
 
+        if response.status_code != 200:
+            print(f"Erro Amazon: Status {response.status_code}")
+            return []
+
         soup = BeautifulSoup(response.text, "html.parser")
+        # Seleciona os containers de produtos
         produtos = soup.find_all("div", {"data-component-type": "s-search-result"})
 
         resultados = []
@@ -33,7 +42,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             if not asin:
                 continue
 
-            # ❌ Ignora se já enviado
+            # ❌ Ignora se já enviado (pode ser removido se o controle for feito apenas no main)
             if ja_enviado(asin):
                 continue
 
@@ -45,7 +54,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 or produto.select_one(".a-price")
             )
 
-            # Ignora preço por unidade
+            # Ignora se for preço por unidade (ex: R$ 0,10/unidade)
             if not container or container.find_parent(class_="pricePerUnit"):
                 continue
 
@@ -67,26 +76,30 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             valor = f"{valor_inteiro},{valor_centavos}"
 
             # =========================
-            # PREÇO ANTIGO
+            # PREÇO ANTIGO (Mantido para o dicionário, o main decide se exibe)
             # =========================
             antigo = produto.select_one(".a-price.a-text-price .a-offscreen")
             p_antigo = None
 
             if antigo:
                 antigo_texto = antigo.get_text(" ", strip=True)
-                antigo_limpo = (
+                # Limpa para formato numérico caso precise de cálculo
+                p_antigo = (
                     antigo_texto
                     .replace("R$", "")
                     .replace(".", "")
-                    .replace(",", ".")
                     .strip()
                 )
-                p_antigo = antigo_limpo
 
             # =========================
-            # TÍTULO
+            # TÍTULO (CORRIGIDO)
             # =========================
-            titulo_tag = produto.select_one("h2 span")
+            # Busca especificamente dentro do H2, que contém o nome completo do produto
+            titulo_tag = (
+                produto.select_one("h2 a span") 
+                or produto.select_one(".a-size-base-plus.a-color-base.a-text-normal")
+            )
+            
             if not titulo_tag:
                 continue
 
@@ -121,6 +134,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             # =========================
             link = f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}"
 
+            # Append dos dados normalizados
             resultados.append({
                 "id": asin,
                 "titulo": titulo,
