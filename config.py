@@ -10,6 +10,7 @@ AMAZON_TAG = os.getenv("StoreID")
 MATT_TOOL = "74449748"
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+SHOPEE_AFFILIATE_ID = "18339480979"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",

@@ -13,6 +13,7 @@ from redis_client import marcar_enviado, ja_enviado
 from mercado_livre import buscar_mercado_livre
 from amazon import buscar_amazon
 from formatters import formatar_copy_otimizada
+from shopee import buscar_shopee
 
 # Inicialização do Cliente
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
@@ -24,6 +25,7 @@ client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 COMPONENTES = {
     "ml": {"busca": buscar_mercado_livre, "simplificado": False},
     "amazon": {"busca": buscar_amazon, "simplificado": True},
+    "shopee": {"busca": buscar_shopee, "simplificado": True},
 }
 
 async def enviar_para_telegram(p: dict, destino: str, simplificado: bool):
