@@ -1,7 +1,6 @@
 import re
 
 def extrair_categoria_hashtag(titulo: str) -> str:
-    """Identifica a categoria com base em palavras-chave no título."""
     titulo_low = titulo.lower()
     categorias = {
         "Cozinha": ["panela", "fritadeira", "airfryer", "prato", "copo", "talher", "cozinha"],
@@ -17,22 +16,24 @@ def extrair_categoria_hashtag(titulo: str) -> str:
     return ""
 
 def formatar_copy_otimizada(p: dict, simplificado: bool = False) -> str:
-    """Formata a mensagem final para o Telegram."""
     try:
         hashtag_cat = extrair_categoria_hashtag(p['titulo'])
         copy = f"**{p['titulo']}**\n"
-        copy += f"⭐ {p['nota']} ({p['avaliacoes']} opiniões)\n"
+        
+        # Lógica corrigida para não mostrar "( opiniões)" se estiver vazio
+        if p.get('avaliacoes') and p['avaliacoes'] != "":
+            copy += f"⭐ {p['nota']} ({p['avaliacoes']} opiniões)\n"
+        else:
+            copy += f"⭐ {p['nota']}\n"
 
         if simplificado:
-            # Layout Amazon: Exibe apenas o preço promocional
+            # Layout Amazon/Shopee
             copy += f"✅ **Por apenas R$ {p['preco']}**\n"
         else:
-            # Layout Padrão (ML): Exibe preço antigo e cálculo de desconto
+            # Layout Mercado Livre
             preco_limpo = re.sub(r'[^\d,]', '', p['preco']).replace(',', '.')
             atual_num = float(preco_limpo)
-            
             if p.get('preco_antigo'):
-                # Limpeza para garantir que o cálculo não falhe
                 antigo_limpo = re.sub(r'[^\d,]', '', str(p['preco_antigo'])).replace(',', '.')
                 try:
                     antigo_num = float(antigo_limpo)
@@ -42,18 +43,15 @@ def formatar_copy_otimizada(p: dict, simplificado: bool = False) -> str:
                         copy += f"📉 ({porcentagem}% de desconto)\n"
                 except:
                     pass
-            
             copy += f"✅ **POR: R$ {p['preco']}**\n"
 
-        # Linhas comuns a todos os componentes
         linha_cartao = f"💳 ou {p['parcelas'].replace('ou', '').strip()}\n" if p.get('parcelas') else ""
         copy += linha_cartao
         copy += f"📦 Frete: {p['frete']}\n"
         copy += f"🔥 Estoque: {p['estoque']}\n\n"
         copy += f"🔗 **LINK DA OFERTA:**\n{p['link']}\n\n"
         copy += f"➡️ #Ofertas{hashtag_cat}"
-        
         return copy
     except Exception as e:
-        print(f"Erro na formatação: {e}")
+        print(f"Erro formatters: {e}")
         return f"**{p['titulo']}**\n\n✅ POR: R$ {p['preco']}\n\n🔗 {p['link']}"
