@@ -8,7 +8,7 @@ from redis_client import ja_enviado
 
 def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
     """
-    Busca produtos na Amazon Brasil com seletores otimizados para título e avaliações.
+    Busca produtos na Amazon Brasil mantendo apenas a nota (estrelas).
     """
     url = f"https://www.amazon.com.br/s?k={termo}"
 
@@ -45,7 +45,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 continue
 
             # =========================
-            # TÍTULO (Otimizado para produto, não marca)
+            # TÍTULO
             # =========================
             titulo_tag = (
                 produto.select_one("h2 a span") or 
@@ -82,11 +82,11 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 p_antigo = antigo.get_text(" ", strip=True).replace("R$", "").replace(".", "").strip()
 
             # =========================
-            # AVALIAÇÃO E NOTA (Seletor Dinâmico)
+            # APENAS A NOTA (ESTRELAS)
             # =========================
-            # Nota (ex: 4.5)
             nota_tag = (
                 produto.select_one("i.a-icon-star-small span") or 
+                # Seletor para página de detalhes se necessário
                 produto.select_one("#acrPopover") or
                 produto.select_one(".a-icon-star")
             )
@@ -98,13 +98,6 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             else:
                 nota = "4.7"
 
-            # Quantidade (ex: 1675)
-            qtd_tag = (
-                produto.select_one("span.a-size-base.s-underline-text") or 
-                produto.select_one("#acrCustomerReviewText")
-            )
-            avaliacoes = re.sub(r"\D", "", qtd_tag.get_text()) if qtd_tag else "50"
-
             # =========================
             # IMAGEM E LINK
             # =========================
@@ -113,7 +106,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             link = f"https://www.amazon.com.br/dp/{asin}?tag={AMAZON_TAG}"
 
             # =========================
-            # RESULTADO FINAL
+            # RESULTADO FINAL (Sem 'avaliacoes')
             # =========================
             resultados.append({
                 "id": asin,
@@ -121,7 +114,7 @@ def buscar_amazon(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 "preco": valor,
                 "preco_antigo": p_antigo,
                 "nota": nota,
-                "avaliacoes": avaliacoes,
+                "avaliacoes": "", # Removido o valor numérico
                 "imagem": imagem,
                 "link": link,
                 "parcelas": "Confira no site",
