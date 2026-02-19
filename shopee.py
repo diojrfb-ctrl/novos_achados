@@ -1,86 +1,85 @@
-from curl_cffi import requests
-from bs4 import BeautifulSoup
 import time
-import random
-import re
-from config import HEADERS
+import hashlib
+import requests
+import json
+# Importamos as configurações protegidas
+from config import SHOPEE_APP_ID, SHOPEE_SECRET, SHOPEE_URL
 from redis_client import ja_enviado
 from seguranca import eh_produto_seguro
 
 def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
-    """Scraper robusto para Shopee com integração de segurança."""
-    url = f"https://shopee.com.br/search?keyword={termo}"
+    """Busca produtos via API Oficial GraphQL usando credenciais do .env"""
     
-    # Cookie aleatório para simular visita real
-    cookies = {"shopee_web_id": str(random.randint(10**10, 10**11))}
+    if not SHOPEE_APP_ID or not SHOPEE_SECRET:
+        print("❌ Erro: Credenciais da Shopee não configuradas no .env")
+        return []
+
+    timestamp = int(time.time())
+    
+    # Query minificada para garantir integridade da assinatura
+    query = '{productOfferV2(keyword:"%s",listType:1,sortType:5,page:1,limit:%d){nodes{itemId,productName,offerLink,imageUrl,priceMin,ratingStar,sales}}}' % (termo, limite + 5)
+    
+    payload = {"query": query}
+    body = json.dumps(payload, separators=(',', ':'))
+    
+    # Cálculo da Assinatura conforme documentação
+    # Signature = SHA256(AppId + Timestamp + Payload + Secret)
+    auth_base = f"{SHOPEE_APP_ID}{timestamp}{body}{SHOPEE_SECRET}"
+    signature = hashlib.sha256(auth_base.encode('utf-8')).hexdigest()
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={signature}"
+    }
 
     try:
-        time.sleep(random.uniform(4.0, 6.0)) 
-
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            cookies=cookies,
-            impersonate="chrome124",
-            timeout=30
-        )
-
+        # Usamos requests puro (mais leve que curl_cffi para chamadas de API)
+        response = requests.post(SHOPEE_URL, headers=headers, data=body, timeout=15)
+        
         if response.status_code != 200:
+            print(f"⚠️ Shopee API Status: {response.status_code}")
             return []
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        # Seletores variados (Shopee muda as classes toda hora)
-        produtos = soup.select('div[data-sqe="item"]') or soup.select('.shopee-search-item-result__item')
+        dados = response.json()
         
+        if "errors" in dados:
+            print(f"❌ Erro Shopee GraphQL: {dados['errors'][0]['message']}")
+            return []
+
+        nodes = dados.get('data', {}).get('productOfferV2', {}).get('nodes', [])
         resultados = []
 
-        for produto in produtos:
+        for item in nodes:
             if len(resultados) >= limite:
                 break
 
-            # Título (Busca em múltiplos lugares)
-            titulo_tag = produto.select_one('div[data-sqe="name"]') or produto.select_one('img[alt]')
-            titulo = ""
-            if titulo_tag:
-                titulo = titulo_tag.get_text(strip=True) if not titulo_tag.get('alt') else titulo_tag.get('alt')
-            
+            titulo = item.get('productName', '')
+            item_id = str(item.get('itemId'))
+
+            # Filtros de Segurança e Redis
             if not titulo or not eh_produto_seguro(titulo):
                 continue
-
-            # Link e ID
-            link_tag = produto.find("a", href=True)
-            if not link_tag: continue
-            link_original = "https://shopee.com.br" + link_tag['href']
             
-            match_id = re.search(r"i\.(\d+\.\d+)", link_original)
-            item_id = match_id.group(1) if match_id else link_original.split("/")[-1]
-
             if ja_enviado(item_id):
                 continue
 
-            # Preço
-            preco_tag = produto.find("span", string=re.compile(r'R\$')) or produto.select_one('div[class*="price"]')
-            preco = re.sub(r'[^\d,]', '', preco_tag.get_text()).strip() if preco_tag else "Confira"
-            
-            # Imagem
-            img_tag = produto.find("img")
-            imagem = img_tag.get("src") if img_tag else None
-
+            # Formatação de saída para manter compatibilidade com seu bot de postagem
             resultados.append({
                 "id": item_id,
                 "titulo": titulo,
-                "preco": preco,
+                "preco": str(item.get('priceMin', '0')).replace('.', ','),
                 "preco_antigo": None,
-                "nota": "4.8",
-                "avaliacoes": "", 
-                "imagem": imagem,
-                "link": f"{link_original}?utm_source=an_18339480979",
+                "nota": str(round(item.get('ratingStar', 4.8), 1)),
+                "avaliacoes": f"{item.get('sales', 0)} vendidos", 
+                "imagem": item.get('imageUrl'),
+                "link": item.get('offerLink'), # Link já com seu tracking de afiliado
                 "parcelas": "Até 12x",
                 "frete": "Frete grátis (com cupom)",
                 "estoque": "Disponível"
             })
 
         return resultados
+
     except Exception as e:
-        print(f"Erro Shopee: {e}")
+        print(f"💥 Erro na integração Shopee: {e}")
         return []
