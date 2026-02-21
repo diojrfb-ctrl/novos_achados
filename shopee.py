@@ -19,7 +19,7 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
 
     timestamp = int(time.time())
     
-    # Query minificada (idêntica ao seu teste que funcionou)
+    # Query minificada para garantir integridade da assinatura
     query_string = (
         '{productOfferV2(keyword:"%s",listType:1,sortType:5,page:1,limit:%d)'
         '{nodes{itemId,productName,productLink,offerLink,imageUrl,priceMin,ratingStar,sales}}}'
@@ -37,12 +37,11 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
     }
 
     try:
-        # Forçamos a URL correta diretamente aqui para evitar erros de config
         url_api = "https://open-api.affiliate.shopee.com.br/graphql"
         response = requests.post(url_api, headers=headers, data=body.encode('utf-8'), timeout=20)
         
         if response.status_code != 200:
-            disparar_log_sync(f"⚠️ [Shopee] Erro HTTP {response.status_code}\nResponda: {response.text[:100]}")
+            disparar_log_sync(f"⚠️ [Shopee] Erro HTTP {response.status_code}")
             return []
 
         dados = response.json()
@@ -55,7 +54,7 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
         nodes = dados.get('data', {}).get('productOfferV2', {}).get('nodes', [])
         
         if not nodes:
-            disparar_log_sync(f"ℹ️ [Shopee] Busca por '{termo}' retornou 0 produtos.")
+            disparar_log_sync(f"ℹ️ [Shopee] Nado encontrado para '{termo}'.")
             return []
 
         resultados = []
@@ -68,11 +67,19 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
             if not titulo or not eh_produto_seguro(titulo) or ja_enviado(item_id):
                 continue
 
+            # --- CORREÇÃO DO ERRO DE ROUND ---
+            # Converte para float antes de arredondar, caso venha como string
+            try:
+                nota_raw = item.get('ratingStar', 4.8)
+                nota_formatada = str(round(float(nota_raw), 1))
+            except (ValueError, TypeError):
+                nota_formatada = "4.8"
+
             resultados.append({
                 "id": item_id,
                 "titulo": titulo,
                 "preco": str(item.get('priceMin', '0')).replace('.', ','),
-                "nota": str(round(item.get('ratingStar', 4.8), 1)),
+                "nota": nota_formatada,
                 "avaliacoes": f"{item.get('sales', 0)}", 
                 "imagem": item.get('imageUrl'),
                 "link": item.get('offerLink') or item.get('productLink'),
@@ -84,5 +91,5 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
         return resultados
 
     except Exception as e:
-        disparar_log_sync(f"💥 [Shopee] Falha Crítica: {e}")
+        disparar_log_sync(f"💥 [Shopee] Erro Interno: {e}")
         return []
