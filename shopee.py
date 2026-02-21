@@ -2,26 +2,35 @@ import time
 import hashlib
 import requests
 import json
-import os
-from config import SHOPEE_APP_ID, SHOPEE_SECRET, SHOPEE_URL
+import asyncio
+from config import SHOPEE_APP_ID, SHOPEE_SECRET, SHOPEE_URL, LOG_CANAL
 from redis_client import ja_enviado
 from seguranca import eh_produto_seguro
 
+# Função auxiliar para enviar logs em tempo real para o Telegram
+def log_telegram(mensagem):
+    print(f"[Shopee Debug] {mensagem}")
+    try:
+        from main import client
+        if LOG_CANAL and client.is_connected():
+            # Cria uma tarefa para enviar a mensagem sem travar a busca
+            loop = asyncio.get_event_loop()
+            loop.create_task(client.send_message(LOG_CANAL, f"🔍 **DEBUG SHOPEE:**\n{mensagem}"))
+    except Exception as e:
+        print(f"Erro ao enviar log para Telegram: {e}")
+
 def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
-    """
-    Versão reconstruída com Logs de Depuração para o Render.
-    """
-    # Garante que as chaves sejam strings puras e sem espaços
+    # Limpeza de credenciais
     app_id = str(SHOPEE_APP_ID or "").strip()
     secret = str(SHOPEE_SECRET or "").strip()
 
     if not app_id or not secret:
-        print("❌ [Shopee] Erro: SHOPEE_APP_ID ou SHOPEE_SECRET não encontrados no ambiente.")
+        log_telegram("❌ Erro: Credenciais ausentes (APP_ID/SECRET).")
         return []
 
     timestamp = int(time.time())
     
-    # Query minificada (padrão que funcionou no seu teste local)
+    # Query limpa para evitar quebras de linha que invalidam a Signature
     query_string = (
         '{productOfferV2(keyword:"%s",listType:1,sortType:5,page:1,limit:%d)'
         '{nodes{itemId,productName,productLink,offerLink,imageUrl,priceMin,ratingStar,sales}}}'
@@ -30,7 +39,7 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
     payload = {"query": query_string}
     body = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
     
-    # Geração da Assinatura
+    # Gerar Signature
     auth_base = f"{app_id}{timestamp}{body}{secret}"
     signature = hashlib.sha256(auth_base.encode('utf-8')).hexdigest()
 
@@ -40,26 +49,23 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
     }
 
     try:
-        # Usando a URL oficial
-        url_oficial = "https://open-api.affiliate.shopee.com.br/graphql"
-        response = requests.post(url_oficial, headers=headers, data=body.encode('utf-8'), timeout=30)
+        response = requests.post(SHOPEE_URL, headers=headers, data=body.encode('utf-8'), timeout=20)
         
         if response.status_code != 200:
-            print(f"⚠️ [Shopee] Erro HTTP {response.status_code}: {response.text[:200]}")
+            log_telegram(f"⚠️ Erro HTTP {response.status_code}\nResposta: {response.text[:100]}")
             return []
 
         dados = response.json()
         
         if "errors" in dados:
-            msg_erro = dados['errors'][0].get('message', 'Erro desconhecido')
-            print(f"❌ [Shopee] A API respondeu com erro: {msg_erro}")
-            # Se o erro for "Signature Not Match", o problema está no APP_ID ou SECRET no Render
+            erro_api = dados['errors'][0].get('message', 'Erro desconhecido')
+            log_telegram(f"❌ Erro na API: {erro_api}")
             return []
 
         nodes = dados.get('data', {}).get('productOfferV2', {}).get('nodes', [])
         
         if not nodes:
-            print(f"ℹ️ [Shopee] API conectou, mas não encontrou produtos para '{termo}'.")
+            log_telegram(f"ℹ️ Conectado, mas 0 produtos para '{termo}'.")
             return []
 
         resultados = []
@@ -78,17 +84,16 @@ def buscar_shopee(termo: str = "ofertas", limite: int = 15) -> list[dict]:
                 "preco": str(item.get('priceMin', '0')).replace('.', ','),
                 "preco_antigo": None,
                 "nota": str(round(item.get('ratingStar', 4.8), 1)),
-                "avaliacoes": f"{item.get('sales', 0)} vendidos", 
+                "avaliacoes": f"{item.get('sales', 0)}", 
                 "imagem": item.get('imageUrl'),
                 "link": item.get('offerLink') or item.get('productLink'),
                 "parcelas": "Até 12x",
-                "frete": "Frete grátis (cupom)",
+                "frete": "Frete grátis",
                 "estoque": "Disponível"
             })
 
-        print(f"✅ [Shopee] {len(resultados)} produtos encontrados.")
         return resultados
 
     except Exception as e:
-        print(f"💥 [Shopee] Erro na requisição: {e}")
+        log_telegram(f"💥 Falha crítica: {str(e)}")
         return []
