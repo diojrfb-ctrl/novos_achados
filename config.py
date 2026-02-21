@@ -20,6 +20,10 @@ SHOPEE_URL = "https://open-api.affiliate.shopee.com.br/graphql"
 # --- CONFIGURAÇÕES AMAZON ---
 AMAZON_TAG = os.getenv("AMAZON_TAG", "suatag-20")
 
+# --- CONFIGURAÇÕES MERCADO LIVRE ---
+# Adicionando a variável que estava faltando para o mercado_livre.py
+MATT_TOOL = os.getenv("MATT_TOOL", "74449748") 
+
 # --- BANCO DE DADOS (REDIS/UPSTASH) ---
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
